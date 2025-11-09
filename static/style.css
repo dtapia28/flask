@@ -1,0 +1,144 @@
+/* --------- Tema & tipografía --------- */
+:root{
+    --bg: #0b0c10;
+    --surface: #121318;
+    --text: #e6e7ea;
+    --muted: #a8adbb;
+    --accent: #6ee7b7;        /* verde suave */
+    --accent-ink: #0b3b2c;
+    --ring: 0 0 0 0.2rem rgba(110,231,183,.35);
+    --radius: 14px;
+    --shadow: 0 10px 30px rgba(0,0,0,.25);
+  }
+  
+  @media (prefers-color-scheme: light){
+    :root{
+      --bg:#f7f7fb; --surface:#ffffff; --text:#1b1e27; --muted:#5a6070;
+      --accent:#0ea5e9; --accent-ink:#062739; --ring:0 0 0 .2rem rgba(14,165,233,.2);
+      --shadow: 0 10px 24px rgba(9,30,66,.08);
+    }
+  }
+  
+  *{ box-sizing: border-box }
+  html,body{ height:100% }
+  body{
+    margin:0;
+    font: 16px/1.5 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Apple Color Emoji","Segoe UI Emoji";
+    color:var(--text);
+    background:
+      radial-gradient(1200px 600px at 20% -10%, rgba(110,231,183,.08), transparent 60%),
+      radial-gradient(1000px 500px at 110% -20%, rgba(14,165,233,.10), transparent 60%),
+      var(--bg);
+  }
+  
+  /* --------- Layout --------- */
+  .container{
+    width:min(1100px, 92vw);
+    margin-inline:auto;
+  }
+  
+  .header{
+    position:sticky; top:0; z-index:10;
+    backdrop-filter: blur(8px);
+    background: color-mix(in srgb, var(--bg) 82%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
+  }
+  
+  .nav{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:16px 0;
+  }
+  
+  .brand{
+    text-decoration:none;
+    color:var(--text);
+    font-weight:700; letter-spacing:.3px;
+    font-size:clamp(18px, 2.3vw, 22px);
+  }
+  .brand .dot{ color:var(--accent) }
+  
+  .hero{
+    padding: clamp(56px, 8vw, 96px) 0;
+    text-align:center;
+  }
+  .hero h1{
+    margin:0 0 8px;
+    font-size: clamp(32px, 6vw, 52px);
+    letter-spacing:-.02em;
+  }
+  .lead{
+    margin:0 auto;
+    max-width: 60ch;
+    color:var(--muted);
+    font-size:clamp(16px, 2.5vw, 18px);
+  }
+  .actions{ margin-top:24px; display:flex; gap:12px; justify-content:center; flex-wrap:wrap }
+  
+  .features{
+    display:grid;
+    gap:18px;
+    grid-template-columns: repeat(12, 1fr);
+    padding: 16px 0 80px;
+  }
+  .card{
+    grid-column: span 12;
+    background:var(--surface);
+    border:1px solid color-mix(in srgb, var(--text) 8%, transparent);
+    border-radius:var(--radius);
+    padding:22px 20px;
+    box-shadow: var(--shadow);
+    transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+  }
+  .card:hover{
+    transform: translateY(-3px);
+    box-shadow: 0 16px 36px rgba(0,0,0,.22);
+    border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+  }
+  .card h3{ margin:0 0 6px; font-size:1.1rem }
+  .card p{ margin:0; color:var(--muted) }
+  
+  @media (min-width:720px){
+    .card{ grid-column: span 4 }
+  }
+  
+  /* --------- Botones & links --------- */
+  .btn{
+    --bg-btn: color-mix(in srgb, var(--surface) 86%, transparent);
+    --ink: var(--text);
+    display:inline-block;
+    padding:10px 14px;
+    border-radius:10px;
+    border:1px solid color-mix(in srgb, var(--text) 12%, transparent);
+    background: var(--bg-btn);
+    color: var(--ink);
+    text-decoration:none;
+    font-weight:600;
+    transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease, background .15s ease;
+  }
+  .btn:hover{ transform: translateY(-1px); box-shadow: var(--shadow) }
+  .btn:focus-visible{ outline:none; box-shadow: var(--ring) }
+  
+  .btn.primary{
+    --bg-btn: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 60%, #fff 40%));
+    --ink: var(--accent-ink);
+    border: none;
+  }
+  
+  .link{ color:var(--accent); text-decoration:none }
+  .link:hover{ text-decoration:underline }
+  
+  /* --------- Footer --------- */
+  .footer{
+    border-top:1px solid color-mix(in srgb, var(--text) 10%, transparent);
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+  }
+  .footer-inner{
+    display:flex; gap:12px; align-items:center; justify-content:space-between;
+    padding:22px 0;
+  }
+  .footer small{ color:var(--muted) }
+  
+  @media (max-width:640px){
+    .footer-inner{ flex-direction:column; text-align:center }
+  }
+  
