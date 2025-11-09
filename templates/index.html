@@ -4,56 +4,43 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Tapiaaraya</title>
-  <meta name="description" content="Sitio de Tapiaaraya" />
+
+  <!-- ¡IMPORTANTE! Usa url_for para que el path al CSS sea correcto -->
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
 <body>
-  <header class="header">
-    <nav class="nav container">
-      <a class="brand" href="/">tapiaaraya<span class="dot">.com</span></a>
-      <a class="btn" href="#contacto">Contacto</a>
+  <header class="container">
+    <nav class="topbar">
+      <a class="brand" href="/">tapiaaraya.com</a>
+      <a class="link" href="mailto:contacto@tapiaaraya.com">Contacto</a>
     </nav>
+    <h1 class="hero">Bienvenido <span>👋</span></h1>
+    <p class="lead">
+      Página mínima con Flask 2.2 en Railway. Ligera, rápida y lista para personalizar.
+    </p>
+    <div class="actions">
+      <a class="btn" href="/">Inicio</a>
+      <a class="btn outline" href="https://tapiaaraya.com" target="_blank" rel="noopener">Visitar dominio</a>
+    </div>
   </header>
 
-  <main>
-    <section class="hero container">
-      <h1>Bienvenido 👋</h1>
-      <p class="lead">
-        Esta es una página mínima desplegada con Flask en Railway.
-        Diseño limpio, rápido y listo para personalizar.
-      </p>
-      <div class="actions">
-        <a class="btn primary" href="#sobre">Saber más</a>
-        <a class="btn" href="https://tapiaaraya.com" target="_blank" rel="noopener">Visitar dominio</a>
-      </div>
+  <main class="container grid">
+    <section class="card">
+      <h2>Ligero</h2>
+      <p>HTML + CSS puro, sin dependencias.</p>
     </section>
-
-    <section id="sobre" class="features container">
-      <article class="card">
-        <h3>Ligero</h3>
-        <p>HTML + CSS puro, sin frameworks ni dependencias externas.</p>
-      </article>
-      <article class="card">
-        <h3>Responsive</h3>
-        <p>Se ve bien en móvil, tablet y desktop con una cuadrícula fluida.</p>
-      </article>
-      <article class="card">
-        <h3>Oscuro/Claro</h3>
-        <p>Respeta el modo de color del sistema con <code>prefers-color-scheme</code>.</p>
-      </article>
+    <section class="card">
+      <h2>Responsive</h2>
+      <p>Se ve bien en móvil, tablet y desktop.</p>
+    </section>
+    <section class="card">
+      <h2>Oscuro/Claro</h2>
+      <p>Respeta <code>prefers-color-scheme</code> del sistema.</p>
     </section>
   </main>
 
-  <footer id="contacto" class="footer">
-    <div class="container footer-inner">
-      <small>© <span id="year"></span> Tapiaaraya — Hecho con Flask</small>
-      <a class="link" href="mailto:contacto@tapiaaraya.com">contacto@tapiaaraya.com</a>
-    </div>
+  <footer class="container footer">
+    <small>© 2025 Tapiaaraya — Hecho con Flask 2.2</small>
   </footer>
-
-  <script>
-    // año automático, sin dependencias
-    document.getElementById('year').textContent = new Date().getFullYear();
-  </script>
 </body>
 </html>
