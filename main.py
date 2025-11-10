@@ -41,10 +41,6 @@ def load_user(user_id):
 def home():
     return render_template("index.html")
 
-@app.get("/login")
-def login():
-    return render_template("login.html")
-
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
