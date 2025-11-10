@@ -2,6 +2,7 @@ from flask import Flask, render_template, redirect, url_for, request, flash
 from flask_sqlalchemy import SQLAlchemy
 from flask_bcrypt import Bcrypt
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
+from werkzeug.security import check_password_hash
 import os
 
 # Si tus carpetas se llaman exactamente "templates" y "static",
@@ -44,16 +45,20 @@ def home():
 def login():
     return render_template("login.html")
 
-@app.post("/login")
-def login_post():
-    username = request.form.get("username")
-    password = request.form.get("password")
-    user = User.query.filter_by(username=username).first()
-    if not user or not bcrypt.check_password_hash(user.password, password):
-        flash("Usuario o contraseña incorrectos")
-        return redirect(url_for("login"))
-    login_user(user)
-    return redirect(url_for("dashboard"))
+@app.post("/login", methods=["POST", "GET"])
+def login():
+    if request.method == "POST":
+        username = request.form.get("username")
+        password = request.form.get("password")
+        user = User.query.filter_by(username=username).first()
+        if user and check_password_hash(user.password, password):
+            flash("Login exitoso", "success")
+            return redirect(url_for("dashboard"))
+        else:
+            flash("Login fallido. Revisa tus credenciales e intenta de nuevo.", "danger")
+            return render_template("login.html")
+    return render_template("login.html")
+
 
 @app.get("/register")
 def register():
