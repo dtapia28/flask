@@ -45,7 +45,7 @@ def home():
 def login():
     return render_template("login.html")
 
-@app.post("/login", methods=["POST", "GET"])
+@app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
         username = request.form.get("username")
