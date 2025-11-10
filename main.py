@@ -2,7 +2,6 @@ from flask import Flask, render_template, redirect, url_for, request, flash
 from flask_sqlalchemy import SQLAlchemy
 from flask_bcrypt import Bcrypt
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
-from werkzeug.security import check_password_hash
 import os
 
 # Si tus carpetas se llaman exactamente "templates" y "static",
@@ -47,7 +46,7 @@ def login():
         username = request.form.get("username")
         password = request.form.get("password")
         user = User.query.filter_by(username=username).first()
-        if user and check_password_hash(user.password, password):
+        if user and bcrypt.check_password_hash(user.password_hash, password):
             flash("Login exitoso", "success")
             return redirect(url_for("dashboard"))
         else:
