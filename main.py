@@ -46,7 +46,7 @@ def login():
         username = request.form.get("username")
         password = request.form.get("password")
         user = User.query.filter_by(username=username).first()
-        if user and bcrypt.check_password_hash(user.password_hash, password):
+        if user and bcrypt.check_password_hash(user.password, password):
             flash("Login exitoso", "success")
             return redirect(url_for("dashboard"))
         else:
