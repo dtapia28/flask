@@ -136,3 +136,10 @@ def test_create_admin_accepts_eight_character_password(client,monkeypatch):
  with main.app.app_context():
   u=main.User.query.filter_by(email='first-admin@example.test').first()
   assert u and main.check_password_hash(u.password,'12345678')
+
+def test_create_admin_explains_missing_database_schema(client):
+ with main.app.app_context():
+  main.db.drop_all()
+  result=main.app.test_cli_runner().invoke(args=['create-admin'])
+  assert result.exit_code != 0
+  assert 'flask --app main db upgrade' in str(result.exception)

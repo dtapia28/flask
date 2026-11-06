@@ -7,13 +7,13 @@ Aplicación Flask en español para listas asignadas, cumplimiento diario e histo
 1. Abre esta carpeta en VS Code y crea un entorno: `python3 -m venv .venv && source .venv/bin/activate`.
 2. Instala paquetes: `pip install -r requirements.txt`.
 3. Copia `.env.example` a `.env`, genera `SECRET_KEY` y `CRON_SECRET` con `python -c "import secrets; print(secrets.token_hex(32))"`. La aplicación carga `.env` automáticamente en desarrollo.
-4. Inicializa migraciones: `flask --app main db init` (solo primera vez), luego `flask --app main db migrate -m "initial"` y `flask --app main db upgrade`.
+4. Aplica las migraciones incluidas en el repositorio: `flask --app main db upgrade`. Usa la misma carpeta y el mismo `.env` para migrar y arrancar Flask; así ambos comandos apuntan a la misma `DATABASE_URL`.
 5. Crea el primer administrador: `flask --app main create-admin` (ver abajo).
 6. Ejecuta `python main.py` y abre `http://localhost:5000`.
 
 ## Administrador inicial
 
-Con `SECRET_KEY` y `DATABASE_URL` ya configuradas, ejecuta `flask --app main create-admin`. El comando solicita nombre, correo y contraseña mediante entrada oculta; exige al menos 8 caracteres, no hay credenciales por defecto ni registro público. Los enlaces de invitación y recuperación también exigen 8 caracteres. Para añadir integrantes, usa Administración y comparte el enlace de invitación de un solo uso, válido dos horas.
+Después de aplicar `flask --app main db upgrade`, y con `SECRET_KEY` y `DATABASE_URL` ya configuradas, ejecuta `flask --app main create-admin`. Si aparece “no such table: user”, aplica primero la migración en la base indicada por ese mismo `DATABASE_URL`; si dice que ya está actualizada, comprueba que terminal y servidor usen el mismo `.env` y la misma carpeta. El comando solicita nombre, correo y contraseña mediante entrada oculta; exige al menos 8 caracteres, no hay credenciales por defecto ni registro público. Los enlaces de invitación y recuperación también exigen 8 caracteres. Para añadir integrantes, usa Administración y comparte el enlace de invitación de un solo uso, válido dos horas.
 
 ## Correo y evaluación de cierres
 

@@ -255,6 +255,8 @@ def toggle_user(uid):
 
 @app.cli.command('create-admin')
 def create_admin_command():
+ if not db.inspect(db.engine).has_table('user'):
+  raise SystemExit('La base todavía no tiene el esquema de la aplicación. Ejecuta primero `flask --app main db upgrade` con el mismo DATABASE_URL y vuelve a intentar.')
  import getpass
  name=input('Nombre: ').strip(); email=input('Correo: ').strip().lower(); password=getpass.getpass('Contraseña (8+ caracteres): ')
  if len(password)<8: raise SystemExit('La contraseña debe tener al menos 8 caracteres.')
