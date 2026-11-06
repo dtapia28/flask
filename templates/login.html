@@ -1,13 +1,1 @@
-<form method="POST" action="/login">
-  <input name="username" placeholder="Usuario" required>
-  <input name="password" type="password" placeholder="Contraseña" required>
-  <button type="submit">Ingresar</button>
-</form>
-<a href="/register">Registrarse</a>
-{% with messages = get_flashed_messages(with_categories=true) %}
-  {% if messages %}
-    {% for category, message in messages %}
-      <div class="alert alert-{{ category }}">{{ message }}</div>
-    {% endfor %}
-  {% endif %}
-{% endwith %}
+{% extends 'base.html' %}{% block content %}<section class="panel narrow"><h1>Ingresar</h1><form method="post"><input type="hidden" name="csrf_token" value="{{csrf_token()}}"><label>Correo<input required type="email" name="email" autocomplete="username"></label><label>Contraseña<input required type="password" name="password" autocomplete="current-password"></label><button>Ingresar</button></form><a href="/forgot">¿Olvidaste tu contraseña?</a></section>{% endblock %}
