@@ -261,3 +261,23 @@ def test_direct_python_startup_reads_flask_dotenv_files(tmp_path):
  script="import main; ctx=main.app.app_context(); ctx.push(); u=main.db.engine.url; assert u.drivername == 'sqlite'; assert u.database.endswith('/instance/from-flaskenv.sqlite')"
  result=subprocess.run([sys.executable,'-c',script],cwd=tmp_path,env=env,text=True,capture_output=True)
  assert result.returncode==0,result.stdout+result.stderr
+
+
+def test_completing_last_task_closes_list_immediately(client):
+ c,ids=client; login(c,'user@example.test')
+ page=c.get('/today')
+ assert page.status_code==200
+ with main.app.app_context():
+  record=main.DailyRecord.query.filter_by(assignment_id=ids[2],day=main.now().date()).one()
+  task_ids=[s.id for s in record.snapshots]
+  record_id=record.id
+ for snapshot_id in task_ids:
+  response=c.post(f'/record/{record_id}/task/{snapshot_id}')
+  assert response.status_code==302
+ with main.app.app_context():
+  record=main.db.session.get(main.DailyRecord,record_id)
+  assert record.status=='done'
+  assert record.closed_at is not None
+  assert all(item.done for item in record.snapshots)
+ assert b'Cumplida y cerrada' in c.get('/today').data
+ assert c.post(f'/record/{record_id}/task/{task_ids[0]}').status_code==403

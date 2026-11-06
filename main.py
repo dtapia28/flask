@@ -160,7 +160,10 @@ def toggle(rid,sid):
  if rec.status!='open' or now()>=datetime.combine(rec.day,rec.assignment.close_time,tzinfo=TZ): abort(403)
  snap=next((s for s in rec.snapshots if s.id==sid),None)
  if not snap: abort(404)
- snap.done=not snap.done; db.session.commit(); return redirect(url_for('today'))
+ snap.done=not snap.done
+ if rec.snapshots and all(item.done for item in rec.snapshots):
+  rec.status='done'; rec.closed_at=now()
+ db.session.commit(); return redirect(url_for('today'))
 @app.get('/history')
 @login_required
 def history():
@@ -244,9 +247,12 @@ def toggle_admin_alert(aid):
 def amend(rid):
  rec=db.get_or_404(DailyRecord,rid); reason=request.form.get('reason','').strip()
  if rec.status!='open' and not reason: flash('Indica el motivo de la corrección.'); return redirect(url_for('admin'))
+ was_open=rec.status=='open'
  previous='; '.join(f'{s.section}/{s.text}:{s.done}' for s in rec.snapshots); db.session.add(ChangeLog(record_id=rid,actor_id=current_user.id,reason=reason,previous=previous))
  for s in rec.snapshots: s.done=(f"task_{s.id}" in request.form)
- rec.status='done' if all(s.done for s in rec.snapshots) else 'missed'; db.session.commit(); return redirect(url_for('admin'))
+ rec.status='done' if all(s.done for s in rec.snapshots) else 'missed'
+ if was_open: rec.closed_at=now()
+ db.session.commit(); return redirect(url_for('admin'))
 @app.route('/password/<raw>',methods=['GET','POST'])
 def set_password(raw):
  # Only the digest is stored; raw token is high-entropy, temporary, and single-use.
