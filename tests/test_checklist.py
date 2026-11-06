@@ -163,6 +163,8 @@ with main.app.app_context():
     expected = {'change_log', 'checklist', 'mail_log', 'user', 'assignment', 'task', 'token', 'daily_record', 'task_snapshot', 'alembic_version'}
     assert expected <= set(main.db.inspect(main.db.engine).get_table_names())
     assert expected - {'alembic_version'} <= set(main.db.metadata.tables)
+    assert {'section'} <= {c['name'] for c in main.db.inspect(main.db.engine).get_columns('task')}
+    assert {'section'} <= {c['name'] for c in main.db.inspect(main.db.engine).get_columns('task_snapshot')}
 second = runner.invoke(args=['db', 'upgrade'])
 assert second.exit_code == 0, second.output + str(second.exception)
 with main.app.app_context():
@@ -192,3 +194,26 @@ with main.app.app_context():
  connection.commit()
  connection.close()
  run_against(stamped_db)
+
+
+def test_admin_can_create_four_sections_and_snapshot_preserves_them(client):
+ c,ids=client; login(c,'admin@example.test')
+ response=c.post('/admin/list',data={
+  'name':'Rutina por momentos','description':'Cuatro grupos',
+  'section_1':'Mañana','tasks_1':'Tender la cama\nDesayunar',
+  'section_2':'Estudio','tasks_2':'Revisar tareas',
+  'section_3':'Tarde','tasks_3':'Ordenar juguetes',
+  'section_4':'Noche','tasks_4':'Preparar ropa',
+ })
+ assert response.status_code==302
+ with main.app.app_context():
+  checklist=main.Checklist.query.filter_by(name='Rutina por momentos').one()
+  tasks=main.Task.query.filter_by(checklist_id=checklist.id).order_by(main.Task.position).all()
+  assert [(t.section,t.text) for t in tasks]==[
+   ('Mañana','Tender la cama'),('Mañana','Desayunar'),('Estudio','Revisar tareas'),
+   ('Tarde','Ordenar juguetes'),('Noche','Preparar ropa')]
+  assignment=main.Assignment(user_id=ids[1],checklist_id=checklist.id,start_date=date(2026,1,1),weekdays='0,1,2,3,4,5,6',close_time=time(23,59))
+  main.db.session.add(assignment); main.db.session.flush(); record=main.dayrecord(assignment,date(2026,1,1)); main.db.session.commit()
+  assert [(s.section,s.text) for s in record.snapshots]==[(t.section,t.text) for t in tasks]
+  tasks[0].section='Renombrada'; main.db.session.commit()
+  assert main.db.session.get(main.DailyRecord,record.id).snapshots[0].section=='Mañana'

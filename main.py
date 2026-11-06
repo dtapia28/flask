@@ -32,13 +32,13 @@ class User(UserMixin,db.Model):
 class Checklist(db.Model):
  id=db.Column(db.Integer,primary_key=True); name=db.Column(db.String(160),nullable=False); description=db.Column(db.Text,default=''); active=db.Column(db.Boolean,default=True)
 class Task(db.Model):
- id=db.Column(db.Integer,primary_key=True); checklist_id=db.Column(db.ForeignKey('checklist.id'),nullable=False); text=db.Column(db.String(300),nullable=False); position=db.Column(db.Integer,default=0); active=db.Column(db.Boolean,default=True)
+ id=db.Column(db.Integer,primary_key=True); checklist_id=db.Column(db.ForeignKey('checklist.id'),nullable=False); section=db.Column(db.String(160),nullable=False,default='General'); text=db.Column(db.String(300),nullable=False); position=db.Column(db.Integer,default=0); active=db.Column(db.Boolean,default=True)
 class Assignment(db.Model):
  id=db.Column(db.Integer,primary_key=True); user_id=db.Column(db.ForeignKey('user.id'),nullable=False); checklist_id=db.Column(db.ForeignKey('checklist.id'),nullable=False); start_date=db.Column(db.Date,nullable=False); weekdays=db.Column(db.String(20),default='0,1,2,3,4,5,6'); close_time=db.Column(db.Time,default=time(23,59)); paused=db.Column(db.Boolean,default=False); alert_admin=db.Column(db.Boolean,default=False); alert_from=db.Column(db.Date,default=lambda:now().date()); checklist=db.relationship(Checklist); user=db.relationship(User)
 class TaskSnapshot(db.Model):
- id=db.Column(db.Integer,primary_key=True); record_id=db.Column(db.ForeignKey('daily_record.id'),nullable=False); task_id=db.Column(db.Integer); text=db.Column(db.String(300),nullable=False); done=db.Column(db.Boolean,default=False)
+ id=db.Column(db.Integer,primary_key=True); record_id=db.Column(db.ForeignKey('daily_record.id'),nullable=False); task_id=db.Column(db.Integer); section=db.Column(db.String(160),nullable=False,default='General'); text=db.Column(db.String(300),nullable=False); done=db.Column(db.Boolean,default=False)
 class DailyRecord(db.Model):
- id=db.Column(db.Integer,primary_key=True); assignment_id=db.Column(db.ForeignKey('assignment.id'),nullable=False); day=db.Column(db.Date,nullable=False); status=db.Column(db.String(20),default='open'); closed_at=db.Column(db.DateTime); snapshots=db.relationship(TaskSnapshot,cascade='all,delete-orphan'); assignment=db.relationship(Assignment)
+ id=db.Column(db.Integer,primary_key=True); assignment_id=db.Column(db.ForeignKey('assignment.id'),nullable=False); day=db.Column(db.Date,nullable=False); status=db.Column(db.String(20),default='open'); closed_at=db.Column(db.DateTime); snapshots=db.relationship(TaskSnapshot,cascade='all,delete-orphan',order_by='TaskSnapshot.id'); assignment=db.relationship(Assignment)
  __table_args__=(UniqueConstraint('assignment_id','day'),)
 class ChangeLog(db.Model):
  id=db.Column(db.Integer,primary_key=True); record_id=db.Column(db.Integer,nullable=False); actor_id=db.Column(db.Integer); changed_at=db.Column(db.DateTime,default=lambda:datetime.now(TZ)); reason=db.Column(db.Text); previous=db.Column(db.Text)
@@ -87,7 +87,7 @@ def dayrecord(assignment,day):
  if not rec:
   rec=DailyRecord(assignment_id=assignment.id,day=day); db.session.add(rec); db.session.flush()
   tasks=Task.query.filter_by(checklist_id=assignment.checklist_id,active=True).order_by(Task.position,Task.id).all()
-  for task in tasks: db.session.add(TaskSnapshot(record_id=rec.id,task_id=task.id,text=task.text))
+  for task in tasks: db.session.add(TaskSnapshot(record_id=rec.id,task_id=task.id,section=task.section,text=task.text))
   db.session.flush()
  return rec
 def scheduled(a,d): return not a.paused and d>=a.start_date and d.weekday() in [int(x) for x in a.weekdays.split(',') if x]
@@ -102,7 +102,7 @@ def evaluate_closures(until=None):
     if close<=until:
      rec=dayrecord(a,d)
      if rec.status=='open':
-      pending=[s.text for s in rec.snapshots if not s.done]
+      pending=[f'{s.section}: {s.text}' for s in rec.snapshots if not s.done]
       rec.status='missed' if pending else 'done'; rec.closed_at=close; changed+=1
    d+=timedelta(days=1)
  db.session.commit()
@@ -112,7 +112,7 @@ def evaluate_closures(until=None):
    day=d[0]; records=DailyRecord.query.join(Assignment).filter(Assignment.user_id==u.id,DailyRecord.day==day,DailyRecord.status=='missed').all()
    if not records: continue
    lines=[]
-   for rec in records: lines.append(f"{rec.assignment.checklist.name} ({rec.day}): " + ', '.join(s.text for s in rec.snapshots if not s.done))
+   for rec in records: lines.append(f"{rec.assignment.checklist.name} ({rec.day}): " + ', '.join(f'{s.section}: {s.text}' for s in rec.snapshots if not s.done))
    body='Listas incompletas:\n'+'\n'.join(lines)+f"\nIngresa: {os.environ.get('APP_URL','http://localhost:5000')}"
    try: send_mail(u.email,'Checklist familiar: tareas pendientes',body,f'user:{u.id}:{day}')
    except Exception: app.logger.exception('Error de correo de usuario')
@@ -190,9 +190,20 @@ def create_token(u,purpose):
 @app.route('/admin/list',methods=['POST'])
 @admin_required
 def add_list():
+ entries=[]
+ if 'tasks' in request.form:  # Keep accepting existing integrations and old form posts.
+  entries=[('General',line.strip()) for line in request.form.get('tasks','').splitlines() if line.strip()]
+ else:
+  for index in range(1,5):
+   section=request.form.get(f'section_{index}','').strip()
+   lines=[line.strip() for line in request.form.get(f'tasks_{index}','').splitlines() if line.strip()]
+   if lines and not section:
+    flash(f'Escribe el nombre de la sección {index}.'); return redirect(url_for('admin'))
+   entries.extend((section,line) for line in lines)
+ if not entries:
+  flash('Agrega al menos un elemento en una sección.'); return redirect(url_for('admin'))
  c=Checklist(name=request.form['name'],description=request.form.get('description','')); db.session.add(c); db.session.flush()
- for i,x in enumerate(request.form.get('tasks','').splitlines()):
-  if x.strip(): db.session.add(Task(checklist_id=c.id,text=x.strip(),position=i))
+ for position,(section,text) in enumerate(entries): db.session.add(Task(checklist_id=c.id,section=section,text=text,position=position))
  db.session.commit(); return redirect(url_for('admin'))
 @app.post('/admin/assign')
 @admin_required
@@ -212,7 +223,7 @@ def toggle_admin_alert(aid):
 def amend(rid):
  rec=db.get_or_404(DailyRecord,rid); reason=request.form.get('reason','').strip()
  if rec.status!='open' and not reason: flash('Indica el motivo de la corrección.'); return redirect(url_for('admin'))
- previous='; '.join(f'{s.text}:{s.done}' for s in rec.snapshots); db.session.add(ChangeLog(record_id=rid,actor_id=current_user.id,reason=reason,previous=previous))
+ previous='; '.join(f'{s.section}/{s.text}:{s.done}' for s in rec.snapshots); db.session.add(ChangeLog(record_id=rid,actor_id=current_user.id,reason=reason,previous=previous))
  for s in rec.snapshots: s.done=(f"task_{s.id}" in request.form)
  rec.status='done' if all(s.done for s in rec.snapshots) else 'missed'; db.session.commit(); return redirect(url_for('admin'))
 @app.route('/password/<raw>',methods=['GET','POST'])
