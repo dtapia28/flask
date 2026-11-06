@@ -5,6 +5,7 @@ Revises: 8c4fd62b7a10
 """
 from alembic import op
 import sqlalchemy as sa
+from migrations.schema_repair import ensure_base_schema
 
 revision = 'ba74c618f091'
 down_revision = '8c4fd62b7a10'
@@ -14,6 +15,9 @@ depends_on = None
 
 def upgrade():
     bind = op.get_bind()
+    # The prior repair revision can already be stamped on a partially restored
+    # database. Reconcile the base tables before inspecting their columns.
+    ensure_base_schema(bind)
     inspector = sa.inspect(bind)
     for table in ('task', 'task_snapshot'):
         columns = {column['name'] for column in inspector.get_columns(table)}

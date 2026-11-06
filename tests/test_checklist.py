@@ -195,6 +195,17 @@ with main.app.app_context():
  connection.close()
  run_against(stamped_db)
 
+ # Reproduce the user's exact state: the repair revision is recorded, but the
+ # DDL it was meant to restore is incomplete (including task and user).
+ partial_db = tmp_path / 'partial-at-repair-head.sqlite'
+ connection = sqlite3.connect(partial_db)
+ connection.execute('CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL PRIMARY KEY)')
+ connection.execute("INSERT INTO alembic_version (version_num) VALUES ('8c4fd62b7a10')")
+ connection.execute('CREATE TABLE checklist (id INTEGER PRIMARY KEY, name VARCHAR(160) NOT NULL, description TEXT, active BOOLEAN)')
+ connection.commit()
+ connection.close()
+ run_against(partial_db)
+
 
 def test_admin_can_create_many_sections_and_snapshot_preserves_them(client):
  c,ids=client; login(c,'admin@example.test')
