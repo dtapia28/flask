@@ -196,24 +196,40 @@ with main.app.app_context():
  run_against(stamped_db)
 
 
-def test_admin_can_create_four_sections_and_snapshot_preserves_them(client):
+def test_admin_can_create_many_sections_and_snapshot_preserves_them(client):
  c,ids=client; login(c,'admin@example.test')
- response=c.post('/admin/list',data={
-  'name':'Rutina por momentos','description':'Cuatro grupos',
-  'section_1':'Mañana','tasks_1':'Tender la cama\nDesayunar',
-  'section_2':'Estudio','tasks_2':'Revisar tareas',
-  'section_3':'Tarde','tasks_3':'Ordenar juguetes',
-  'section_4':'Noche','tasks_4':'Preparar ropa',
- })
+ import json
+ sections=[
+  {'name':'Mañana','items':'Tender la cama\nDesayunar'},
+  {'name':'Estudio','items':'Revisar tareas'},
+  {'name':'Tarde','items':'Ordenar juguetes'},
+  {'name':'Noche','items':'Preparar ropa'},
+  {'name':'Antes de dormir','items':'Leer'},
+ ]
+ response=c.post('/admin/list',data={'name':'Rutina por momentos','description':'Secciones dinámicas','sections_json':json.dumps(sections)})
  assert response.status_code==302
  with main.app.app_context():
   checklist=main.Checklist.query.filter_by(name='Rutina por momentos').one()
   tasks=main.Task.query.filter_by(checklist_id=checklist.id).order_by(main.Task.position).all()
   assert [(t.section,t.text) for t in tasks]==[
    ('Mañana','Tender la cama'),('Mañana','Desayunar'),('Estudio','Revisar tareas'),
-   ('Tarde','Ordenar juguetes'),('Noche','Preparar ropa')]
+   ('Tarde','Ordenar juguetes'),('Noche','Preparar ropa'),('Antes de dormir','Leer')]
   assignment=main.Assignment(user_id=ids[1],checklist_id=checklist.id,start_date=date(2026,1,1),weekdays='0,1,2,3,4,5,6',close_time=time(23,59))
   main.db.session.add(assignment); main.db.session.flush(); record=main.dayrecord(assignment,date(2026,1,1)); main.db.session.commit()
   assert [(s.section,s.text) for s in record.snapshots]==[(t.section,t.text) for t in tasks]
   tasks[0].section='Renombrada'; main.db.session.commit()
   assert main.db.session.get(main.DailyRecord,record.id).snapshots[0].section=='Mañana'
+
+def test_admin_can_create_eight_thousand_sections(client):
+ c,ids=client; login(c,'admin@example.test')
+ import json
+ sections=[{'name':f'Sección {n}','items':f'Elemento {n}'} for n in range(8000)]
+ response=c.post('/admin/list',data={'name':'Lista extensa','sections_json':json.dumps(sections)})
+ assert response.status_code==302
+ with main.app.app_context():
+  checklist=main.Checklist.query.filter_by(name='Lista extensa').one()
+  assert main.Task.query.filter_by(checklist_id=checklist.id).count()==8000
+  first=main.Task.query.filter_by(checklist_id=checklist.id).order_by(main.Task.position).first()
+  last=main.Task.query.filter_by(checklist_id=checklist.id).order_by(main.Task.position.desc()).first()
+  assert (first.section,first.text)==('Sección 0','Elemento 0')
+  assert (last.section,last.text)==('Sección 7999','Elemento 7999')

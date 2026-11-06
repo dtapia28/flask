@@ -1,4 +1,4 @@
-import os, secrets, hashlib
+import os, secrets, hashlib, json
 from datetime import datetime, date, time, timedelta
 from zoneinfo import ZoneInfo
 from functools import wraps
@@ -14,7 +14,7 @@ from sqlalchemy import UniqueConstraint
 
 TZ = ZoneInfo('America/Santiago')
 app = Flask(__name__)
-app.config.update(SECRET_KEY=os.environ.get('SECRET_KEY') or secrets.token_hex(32), SQLALCHEMY_DATABASE_URI=os.environ.get('DATABASE_URL','sqlite:///checklist.db').replace('postgres://','postgresql://'), SQLALCHEMY_TRACK_MODIFICATIONS=False, SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Lax', SESSION_COOKIE_SECURE=os.environ.get('COOKIE_SECURE','false').lower()=='true', WTF_CSRF_TIME_LIMIT=None)
+app.config.update(SECRET_KEY=os.environ.get('SECRET_KEY') or secrets.token_hex(32), SQLALCHEMY_DATABASE_URI=os.environ.get('DATABASE_URL','sqlite:///checklist.db').replace('postgres://','postgresql://'), SQLALCHEMY_TRACK_MODIFICATIONS=False, MAX_CONTENT_LENGTH=5 * 1024 * 1024, MAX_FORM_MEMORY_SIZE=4 * 1024 * 1024, SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Lax', SESSION_COOKIE_SECURE=os.environ.get('COOKIE_SECURE','false').lower()=='true', WTF_CSRF_TIME_LIMIT=None)
 db=SQLAlchemy(app); Migrate(app,db); csrf=CSRFProtect(app); login=LoginManager(app); login.login_view='login'
 class PrefixMiddleware:
  def __init__(self, app, prefix='/checklist'): self.app=app; self.prefix=prefix
@@ -191,15 +191,36 @@ def create_token(u,purpose):
 @admin_required
 def add_list():
  entries=[]
- if 'tasks' in request.form:  # Keep accepting existing integrations and old form posts.
-  entries=[('General',line.strip()) for line in request.form.get('tasks','').splitlines() if line.strip()]
- else:
-  for index in range(1,5):
-   section=request.form.get(f'section_{index}','').strip()
-   lines=[line.strip() for line in request.form.get(f'tasks_{index}','').splitlines() if line.strip()]
+ if 'sections_json' in request.form:
+  try: sections=json.loads(request.form.get('sections_json','[]'))
+  except (TypeError,ValueError):
+   flash('No se pudieron leer las secciones. Inténtalo de nuevo.'); return redirect(url_for('admin'))
+  if not isinstance(sections,list):
+   flash('El formato de las secciones no es válido.'); return redirect(url_for('admin'))
+  for section_data in sections:
+   if not isinstance(section_data,dict):
+    flash('El formato de una sección no es válido.'); return redirect(url_for('admin'))
+   section=str(section_data.get('name','')).strip()
+   items=section_data.get('items','')
+   if not isinstance(items,str):
+    flash('Los elementos de una sección deben ser texto.'); return redirect(url_for('admin'))
+   lines=[line.strip() for line in items.splitlines() if line.strip()]
    if lines and not section:
-    flash(f'Escribe el nombre de la sección {index}.'); return redirect(url_for('admin'))
+    flash('Escribe un nombre para cada sección que tenga elementos.'); return redirect(url_for('admin'))
+   if len(section)>160 or any(len(line)>300 for line in lines):
+    flash('El nombre de una sección admite hasta 160 caracteres y cada elemento hasta 300.'); return redirect(url_for('admin'))
    entries.extend((section,line) for line in lines)
+ elif 'section_name' in request.form:
+  names=request.form.getlist('section_name'); bodies=request.form.getlist('section_items')
+  if len(names)!=len(bodies):
+   flash('El formulario de secciones está incompleto.'); return redirect(url_for('admin'))
+  for section,items in zip(names,bodies):
+   section=section.strip(); lines=[line.strip() for line in items.splitlines() if line.strip()]
+   if lines and not section:
+    flash('Escribe un nombre para cada sección que tenga elementos.'); return redirect(url_for('admin'))
+   entries.extend((section,line) for line in lines)
+ elif 'tasks' in request.form:  # Keep accepting older form posts.
+  entries=[('General',line.strip()) for line in request.form.get('tasks','').splitlines() if line.strip()]
  if not entries:
   flash('Agrega al menos un elemento en una sección.'); return redirect(url_for('admin'))
  c=Checklist(name=request.form['name'],description=request.form.get('description','')); db.session.add(c); db.session.flush()
