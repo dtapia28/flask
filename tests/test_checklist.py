@@ -143,3 +143,52 @@ def test_create_admin_explains_missing_database_schema(client):
   result=main.app.test_cli_runner().invoke(args=['create-admin'])
   assert result.exit_code != 0
   assert 'flask --app main db upgrade' in str(result.exception)
+
+
+def test_migrations_rebuild_empty_and_stamped_sqlite_databases(tmp_path):
+ import os
+ import sqlite3
+ import subprocess
+ import sys
+ from pathlib import Path
+
+ repo = Path(__file__).resolve().parents[1]
+ check_script = r'''import builtins, getpass
+from unittest.mock import patch
+import main
+runner = main.app.test_cli_runner()
+first = runner.invoke(args=['db', 'upgrade'])
+assert first.exit_code == 0, first.output + str(first.exception)
+with main.app.app_context():
+    expected = {'change_log', 'checklist', 'mail_log', 'user', 'assignment', 'task', 'token', 'daily_record', 'task_snapshot', 'alembic_version'}
+    assert expected <= set(main.db.inspect(main.db.engine).get_table_names())
+    assert expected - {'alembic_version'} <= set(main.db.metadata.tables)
+second = runner.invoke(args=['db', 'upgrade'])
+assert second.exit_code == 0, second.output + str(second.exception)
+with main.app.app_context():
+    assert expected <= set(main.db.inspect(main.db.engine).get_table_names())
+    if main.User.query.count() == 0:
+        with patch('builtins.input', side_effect=['Admin', 'admin@migration.test']), patch('getpass.getpass', return_value='passw0rd'):
+            result = runner.invoke(args=['create-admin'])
+        assert result.exit_code == 0, result.output + str(result.exception)
+        user = main.User.query.filter_by(email='admin@migration.test').one()
+        assert main.check_password_hash(user.password, 'passw0rd')
+'''
+
+ def run_against(path):
+  env = os.environ.copy()
+  env['DATABASE_URL'] = 'sqlite:///' + str(path)
+  env['SECRET_KEY'] = 'test-only-random-secret'
+  proc = subprocess.run([sys.executable, '-c', check_script], cwd=repo, env=env, text=True, capture_output=True)
+  assert proc.returncode == 0, proc.stdout + proc.stderr
+
+ empty_db = tmp_path / 'empty.sqlite'
+ run_against(empty_db)
+
+ stamped_db = tmp_path / 'stamped.sqlite'
+ connection = sqlite3.connect(stamped_db)
+ connection.execute('CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL PRIMARY KEY)')
+ connection.execute("INSERT INTO alembic_version (version_num) VALUES ('f6957a9f2cd9')")
+ connection.commit()
+ connection.close()
+ run_against(stamped_db)
