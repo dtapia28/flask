@@ -223,7 +223,7 @@ def set_password(raw):
  if not t or expiry<now(): abort(400)
  if request.method=='POST':
   pw=request.form.get('password','')
-  if len(pw)<12: flash('Usa al menos 12 caracteres.')
+  if len(pw)<8: flash('Usa al menos 8 caracteres.')
   else: u=db.session.get(User,t.user_id); u.password=generate_password_hash(pw); t.used=True; db.session.commit(); flash('Contraseña guardada. Ya puedes ingresar.'); return redirect(url_for('login'))
  return render_template('password.html')
 @app.route('/forgot',methods=['GET','POST'])
@@ -256,7 +256,7 @@ def toggle_user(uid):
 @app.cli.command('create-admin')
 def create_admin_command():
  import getpass
- name=input('Nombre: ').strip(); email=input('Correo: ').strip().lower(); password=getpass.getpass('Contraseña (12+ caracteres): ')
- if len(password)<12: raise SystemExit('La contraseña debe tener al menos 12 caracteres.')
+ name=input('Nombre: ').strip(); email=input('Correo: ').strip().lower(); password=getpass.getpass('Contraseña (8+ caracteres): ')
+ if len(password)<8: raise SystemExit('La contraseña debe tener al menos 8 caracteres.')
  if User.query.filter_by(email=email).first(): raise SystemExit('Ese correo ya existe.')
  db.session.add(User(name=name,email=email,password=generate_password_hash(password),role='admin')); db.session.commit(); print('Administrador creado.')

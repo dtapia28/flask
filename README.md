@@ -13,7 +13,7 @@ Aplicación Flask en español para listas asignadas, cumplimiento diario e histo
 
 ## Administrador inicial
 
-Con `SECRET_KEY` y `DATABASE_URL` ya configuradas, ejecuta `flask --app main create-admin`. El comando solicita nombre, correo y contraseña mediante entrada oculta; no hay credenciales por defecto ni registro público. Para añadir integrantes, usa Administración y comparte el enlace de invitación de un solo uso, válido dos horas.
+Con `SECRET_KEY` y `DATABASE_URL` ya configuradas, ejecuta `flask --app main create-admin`. El comando solicita nombre, correo y contraseña mediante entrada oculta; exige al menos 8 caracteres, no hay credenciales por defecto ni registro público. Los enlaces de invitación y recuperación también exigen 8 caracteres. Para añadir integrantes, usa Administración y comparte el enlace de invitación de un solo uso, válido dos horas.
 
 ## Correo y evaluación de cierres
 

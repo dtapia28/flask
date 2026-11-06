@@ -106,7 +106,7 @@ def test_password_setup_token_is_one_time_and_not_stored_verbatim(client):
  with main.app.app_context():
   token=main.Token.query.order_by(main.Token.id.desc()).first()
   assert token.digest != raw
- first=c.post(f'/password/{raw}',data={'password':'a-very-long-password'})
+ first=c.post(f'/password/{raw}',data={'password':'passw0rd'})
  assert first.status_code==302
  assert c.get(f'/password/{raw}').status_code==400
 
@@ -115,3 +115,24 @@ def test_cron_requires_bearer_secret(client,monkeypatch):
  assert c.post('/admin/cron').status_code==401
  assert c.post('/admin/cron',headers={'Authorization':'Bearer wrong'}).status_code==401
  assert c.post('/admin/cron',headers={'Authorization':'Bearer cron-test'}).status_code==200
+
+
+def test_password_minimum_is_eight_characters(client):
+ c,ids=client; login(c,'admin@example.test')
+ response=c.post('/admin/user',data={'name':'New Member','email':'new@example.test'},follow_redirects=True)
+ raw=re.search(rb'/password/([A-Za-z0-9_-]+)',response.data).group(1).decode()
+ too_short=c.post(f'/password/{raw}',data={'password':'1234567'})
+ assert b'al menos 8 caracteres' in too_short.data
+ accepted=c.post(f'/password/{raw}',data={'password':'12345678'})
+ assert accepted.status_code==302
+
+def test_create_admin_accepts_eight_character_password(client,monkeypatch):
+ c,ids=client
+ import getpass
+ monkeypatch.setattr('builtins.input',lambda prompt:'First Admin' if prompt=='Nombre: ' else 'first-admin@example.test')
+ monkeypatch.setattr(getpass,'getpass',lambda prompt:'12345678')
+ result=main.app.test_cli_runner().invoke(args=['create-admin'])
+ assert result.exit_code==0
+ with main.app.app_context():
+  u=main.User.query.filter_by(email='first-admin@example.test').first()
+  assert u and main.check_password_hash(u.password,'12345678')
