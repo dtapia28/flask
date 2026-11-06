@@ -8,7 +8,7 @@ from flask_migrate import Migrate
 from flask_login import LoginManager, UserMixin, login_user, logout_user, current_user, login_required
 from flask_wtf.csrf import CSRFProtect
 from werkzeug.security import generate_password_hash, check_password_hash
-from dotenv import load_dotenv
+from flask.cli import load_dotenv
 load_dotenv()
 from sqlalchemy import UniqueConstraint
 

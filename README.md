@@ -6,7 +6,7 @@ Aplicación Flask en español para listas asignadas, cumplimiento diario e histo
 
 1. Abre esta carpeta en VS Code y crea un entorno: `python3 -m venv .venv && source .venv/bin/activate`.
 2. Instala paquetes: `pip install -r requirements.txt`.
-3. Copia `.env.example` a `.env`, genera `SECRET_KEY` y `CRON_SECRET` con `python -c "import secrets; print(secrets.token_hex(32))"`. La aplicación carga `.env` automáticamente en desarrollo.
+3. Copia `.env.example` a `.env`, genera `SECRET_KEY` y `CRON_SECRET` con `python -c "import secrets; print(secrets.token_hex(32))"`. La aplicación carga `.env` y `.flaskenv` con el mismo cargador de Flask CLI, tanto con `python main.py` como con `flask --app main run`; las variables exportadas en la terminal prevalecen.
 4. Aplica las migraciones incluidas en el repositorio: `flask --app main db upgrade`. Usa la misma carpeta y el mismo `.env` para migrar y arrancar Flask; así ambos comandos apuntan a la misma `DATABASE_URL`.
 5. Crea el primer administrador: `flask --app main create-admin` (ver abajo).
 6. Ejecuta `python main.py` y abre `http://localhost:5000`.

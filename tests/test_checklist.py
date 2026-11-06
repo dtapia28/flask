@@ -233,3 +233,20 @@ def test_admin_can_create_eight_thousand_sections(client):
   last=main.Task.query.filter_by(checklist_id=checklist.id).order_by(main.Task.position.desc()).first()
   assert (first.section,first.text)==('Sección 0','Elemento 0')
   assert (last.section,last.text)==('Sección 7999','Elemento 7999')
+
+
+def test_direct_python_startup_reads_flask_dotenv_files(tmp_path):
+ import os
+ import subprocess
+ import sys
+ from pathlib import Path
+
+ repo=Path(__file__).resolve().parents[1]
+ (tmp_path/'.flaskenv').write_text('DATABASE_URL=sqlite:///from-flaskenv.sqlite\n')
+ env=os.environ.copy()
+ env.pop('DATABASE_URL',None)
+ env['SECRET_KEY']='test-only-random-secret'
+ env['PYTHONPATH']=str(repo)
+ script="import main; ctx=main.app.app_context(); ctx.push(); u=main.db.engine.url; assert u.drivername == 'sqlite'; assert u.database.endswith('/instance/from-flaskenv.sqlite')"
+ result=subprocess.run([sys.executable,'-c',script],cwd=tmp_path,env=env,text=True,capture_output=True)
+ assert result.returncode==0,result.stdout+result.stderr
