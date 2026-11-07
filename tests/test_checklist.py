@@ -216,6 +216,16 @@ with main.app.app_context():
  connection.close()
  run_against(stamped_failed_db)
 
+ # Reproduce the latest user report: the newest prior revision is stamped,
+ # but no application table survived its earlier SQLite DDL attempt.
+ stamped_latest_db = tmp_path / 'stamped-latest-without-schema.sqlite'
+ connection = sqlite3.connect(stamped_latest_db)
+ connection.execute('CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL PRIMARY KEY)')
+ connection.execute("INSERT INTO alembic_version (version_num) VALUES ('da2c87f179ab')")
+ connection.commit()
+ connection.close()
+ run_against(stamped_latest_db)
+
 
 def test_admin_can_create_many_sections_and_snapshot_preserves_them(client):
  c,ids=client; login(c,'admin@example.test')
