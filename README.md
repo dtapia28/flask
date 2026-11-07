@@ -11,6 +11,17 @@ Aplicación Flask en español para listas asignadas, cumplimiento diario e histo
 5. Crea el primer administrador: `flask --app main create-admin` (ver abajo).
 6. Ejecuta `python main.py` y abre `http://localhost:5000`.
 
+## Datos de prueba locales
+
+Para cargar cuentas demo y una lista asignada sin contraseñas fijas, ejecuta las migraciones y luego activa el comando solo para esa llamada:
+
+```bash
+flask --app main db upgrade
+ALLOW_DEMO_SEED=true APP_URL=http://localhost:5001 flask --app main seed-demo
+```
+
+El comando solo acepta SQLite local, se niega en Railway/producción, es idempotente y muestra enlaces de establecimiento de contraseña de un solo uso, válidos por dos horas. Puedes cambiar `DEMO_ADMIN_EMAIL` y `DEMO_USER_EMAIL` en `.env`. No se ejecuta al arrancar la app ni borra datos.
+
 ## Administrador inicial
 
 Después de aplicar `flask --app main db upgrade`, y con `SECRET_KEY` y `DATABASE_URL` ya configuradas, ejecuta `flask --app main create-admin`. Las revisiones de reparación reconcilian bases SQLite cuyo marcador Alembic avanzó pero quedaron con tablas incompletas tras un fallo DDL, preservando tablas y datos existentes. Si aparece “no such table: user”, ejecuta `flask --app main db upgrade` desde la raíz del proyecto y vuelve a crear el administrador; si no aplica revisiones, comprueba que ambos comandos usan el mismo `.env` y `DATABASE_URL`. El comando solicita nombre, correo y contraseña mediante entrada oculta; exige al menos 8 caracteres, no hay credenciales por defecto ni registro público. Los enlaces de invitación y recuperación también exigen 8 caracteres. Para añadir integrantes, usa Administración y comparte el enlace de invitación de un solo uso, válido dos horas.

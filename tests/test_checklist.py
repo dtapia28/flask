@@ -309,3 +309,26 @@ def test_today_preserves_scroll_position_after_task_post(client):
  assert response.status_code==200
  assert b"sessionStorage.setItem(key,String(window.scrollY))" in response.data
  assert b"window.scrollTo(0,y)" in response.data
+
+
+def test_seed_demo_is_opt_in_and_idempotent(client,monkeypatch):
+ c,ids=client
+ runner=main.app.test_cli_runner()
+ blocked=runner.invoke(args=['seed-demo'])
+ assert blocked.exit_code!=0
+ monkeypatch.setenv('ALLOW_DEMO_SEED','true')
+ monkeypatch.setenv('APP_URL','http://localhost:5001')
+ first=runner.invoke(args=['seed-demo'])
+ assert first.exit_code==0,first.output+str(first.exception)
+ second=runner.invoke(args=['seed-demo'])
+ assert second.exit_code==0,second.output+str(second.exception)
+ assert 'http://localhost:5001/password/' in second.output
+ with main.app.app_context():
+  demo_admin=main.User.query.filter_by(email='demo-admin@example.test').one()
+  demo_user=main.User.query.filter_by(email='demo-user@example.test').one()
+  checklist=main.Checklist.query.filter_by(name='Lista de ejemplo para pruebas').one()
+  assert demo_admin.role=='admin' and demo_user.role=='user'
+  assert main.Task.query.filter_by(checklist_id=checklist.id).count()==4
+  assert main.Assignment.query.filter_by(user_id=demo_user.id,checklist_id=checklist.id).count()==1
+  for person in (demo_admin,demo_user):
+   assert main.Token.query.filter_by(user_id=person.id,purpose='setup',used=False).count()==1
