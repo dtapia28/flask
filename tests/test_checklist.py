@@ -291,3 +291,11 @@ def test_completing_last_task_closes_list_immediately(client):
   assert all(item.done for item in record.snapshots)
  assert b'Cumplida y cerrada' in c.get('/today').data
  assert c.post(f'/record/{record_id}/task/{task_ids[0]}').status_code==403
+
+
+def test_today_preserves_scroll_position_after_task_post(client):
+ c,ids=client; login(c,'user@example.test')
+ response=c.get('/today')
+ assert response.status_code==200
+ assert b"sessionStorage.setItem(key,String(window.scrollY))" in response.data
+ assert b"window.scrollTo(0,y)" in response.data
