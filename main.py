@@ -14,8 +14,32 @@ load_dotenv()
 from sqlalchemy import UniqueConstraint
 
 TZ = ZoneInfo('America/Santiago')
+def normalize_database_url(url):
+ if url.startswith('postgres://'):
+  return url.replace('postgres://','postgresql+psycopg://',1)
+ if url.startswith('postgresql://'):
+  return url.replace('postgresql://','postgresql+psycopg://',1)
+ return url
+
+production = os.environ.get('APP_ENV','').lower()=='production' or bool(os.environ.get('RAILWAY_ENVIRONMENT'))
+database_url = os.environ.get('DATABASE_URL','sqlite:///checklist.db')
+if production:
+ required = ['SECRET_KEY','DATABASE_URL','APP_URL','CRON_SECRET','ADMIN_EMAIL','MAIL_FROM','SMTP_HOST','SMTP_USER','SMTP_PASSWORD']
+ missing = [key for key in required if not os.environ.get(key)]
+ if missing:
+  raise RuntimeError('Faltan variables requeridas para producción: '+', '.join(missing))
+ if len(os.environ['SECRET_KEY']) < 32 or len(os.environ['CRON_SECRET']) < 32:
+  raise RuntimeError('SECRET_KEY y CRON_SECRET deben tener al menos 32 caracteres.')
+ if not database_url.startswith(('postgres://','postgresql://','postgresql+psycopg://')):
+  raise RuntimeError('En producción DATABASE_URL debe apuntar a PostgreSQL.')
+ if not os.environ['APP_URL'].startswith('https://'):
+  raise RuntimeError('APP_URL debe comenzar con https:// en producción.')
+ if os.environ.get('MAIL_MODE','').lower()!='smtp':
+  raise RuntimeError('En producción configura MAIL_MODE=smtp.')
+ if os.environ.get('COOKIE_SECURE','').lower()!='true':
+  raise RuntimeError('En producción configura COOKIE_SECURE=true.')
 app = Flask(__name__)
-app.config.update(SECRET_KEY=os.environ.get('SECRET_KEY') or secrets.token_hex(32), SQLALCHEMY_DATABASE_URI=os.environ.get('DATABASE_URL','sqlite:///checklist.db').replace('postgres://','postgresql://'), SQLALCHEMY_TRACK_MODIFICATIONS=False, MAX_CONTENT_LENGTH=5 * 1024 * 1024, MAX_FORM_MEMORY_SIZE=4 * 1024 * 1024, SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Lax', SESSION_COOKIE_SECURE=os.environ.get('COOKIE_SECURE','false').lower()=='true', WTF_CSRF_TIME_LIMIT=None)
+app.config.update(SECRET_KEY=os.environ.get('SECRET_KEY') or secrets.token_hex(32), SQLALCHEMY_DATABASE_URI=normalize_database_url(database_url), SQLALCHEMY_TRACK_MODIFICATIONS=False, MAX_CONTENT_LENGTH=5 * 1024 * 1024, MAX_FORM_MEMORY_SIZE=4 * 1024 * 1024, SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Lax', SESSION_COOKIE_SECURE=production or os.environ.get('COOKIE_SECURE','false').lower()=='true')
 db=SQLAlchemy(app); Migrate(app,db); csrf=CSRFProtect(app); login=LoginManager(app); login.login_view='login'
 class PrefixMiddleware:
  def __init__(self, app, prefix='/checklist'): self.app=app; self.prefix=prefix
@@ -30,6 +54,8 @@ app.wsgi_app=PrefixMiddleware(app.wsgi_app)
 class User(UserMixin,db.Model):
  id=db.Column(db.Integer,primary_key=True); email=db.Column(db.String(255),unique=True,nullable=False); name=db.Column(db.String(120),nullable=False); password=db.Column(db.String(255),nullable=False); role=db.Column(db.String(20),default='user',nullable=False); active=db.Column(db.Boolean,default=True,nullable=False)
  def get_id(self): return str(self.id)
+ @property
+ def is_active(self): return self.active
 class Checklist(db.Model):
  id=db.Column(db.Integer,primary_key=True); name=db.Column(db.String(160),nullable=False); description=db.Column(db.Text,default=''); active=db.Column(db.Boolean,default=True)
 class Task(db.Model):
@@ -283,8 +309,6 @@ def cron():
 @app.get('/health')
 def health(): return 'ok',200
 
-if __name__=='__main__': app.run(host='0.0.0.0',port=int(os.environ.get('PORT',5000)),debug=os.environ.get('FLASK_DEBUG')=='1')
-
 @app.post('/admin/user/<int:uid>/toggle')
 @admin_required
 def toggle_user(uid):
@@ -347,3 +371,16 @@ def seed_demo_command():
  click.echo(f'Admin de prueba: {links[0][0]} · enlace temporal (2 horas): {links[0][1]}')
  click.echo(f'Usuario de prueba: {links[1][0]} · enlace temporal (2 horas): {links[1][1]}')
  click.echo(f'Lista asignada: {checklist.name}')
+
+@app.cli.command('process-closures')
+def process_closures_command():
+ """Close elapsed daily checklists and send configured notifications."""
+ try:
+  closed=evaluate_closures()
+  click.echo(f'Cierres procesados: {closed}')
+ finally:
+  db.session.remove()
+  db.engine.dispose()
+
+if __name__=='__main__':
+ app.run(host='0.0.0.0',port=int(os.environ.get('PORT',5000)),debug=os.environ.get('FLASK_DEBUG')=='1')

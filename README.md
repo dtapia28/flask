@@ -5,7 +5,7 @@ Aplicación Flask en español para listas asignadas, cumplimiento diario e histo
 ## Ejecutar localmente (Mac / VS Code)
 
 1. Abre esta carpeta en VS Code y crea un entorno: `python3 -m venv .venv && source .venv/bin/activate`.
-2. Instala paquetes: `pip install -r requirements.txt`.
+2. Instala paquetes de desarrollo: `pip install -r requirements-dev.txt`.
 3. Copia `.env.example` a `.env`, genera `SECRET_KEY` y `CRON_SECRET` con `python -c "import secrets; print(secrets.token_hex(32))"`. La aplicación carga `.env` y `.flaskenv` con el mismo cargador de Flask CLI, tanto con `python main.py` como con `flask --app main run`; las variables exportadas en la terminal prevalecen.
 4. Aplica las migraciones incluidas en el repositorio: `flask --app main db upgrade`. Usa la misma carpeta y el mismo `.env` para migrar y arrancar Flask; así ambos comandos apuntan a la misma `DATABASE_URL`.
 5. Crea el primer administrador: `flask --app main create-admin` (ver abajo).
@@ -30,14 +30,26 @@ Después de aplicar `flask --app main db upgrade`, y con `SECRET_KEY` y `DATABAS
 
 Desarrollo usa `MAIL_MODE=console`: los mensajes quedan registrados y se escriben en el log local, sin entregarse. Producción requiere `MAIL_MODE=smtp`, `MAIL_FROM`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, y `ADMIN_EMAIL`. SMTP debe permitir STARTTLS.
 
-Cierres/envíos se procesan mediante `POST /admin/cron` con `Authorization: Bearer $CRON_SECRET`. Configura un cron externo de bajo costo para llamar el endpoint, idealmente cada 5–15 minutos. Repetirlo es seguro por claves únicas de correo. Los cierres atrasados se generan con su fecha local real y el correo al usuario se agrupa por usuario y fecha. El servicio de cron debe reintentar errores HTTP; los errores de entrega quedan en el log del servicio. La ruta puede tardar según el volumen de fechas acumuladas.
+Cierres/envíos se procesan con `flask --app main process-closures`, que cierra los registros vencidos, manda los correos configurados y termina. Programa una ejecución cada 5 minutos en el servicio cron de Railway. El comando también puede ejecutarse manualmente en local. El endpoint autenticado `POST /admin/cron` sigue disponible para un cron HTTP externo. Los cierres atrasados usan la fecha local real; los correos quedan deduplicados en la base.
 
 ## Railway
 
-- Añade una base PostgreSQL persistente y asigna su `DATABASE_URL` al servicio Flask. SQLite local sirve solo para desarrollo: el disco de Railway no debe considerarse persistente.
-- Define `SECRET_KEY`, `COOKIE_SECURE=true`, `APP_URL=https://tapiaaraya.com/checklist`, `CRON_SECRET`, `MAIL_MODE=smtp`, credenciales SMTP y `ADMIN_EMAIL`.
-- Ejecuta `flask --app main db upgrade` en el proceso de release antes de iniciar Gunicorn (`gunicorn main:app`). Programa el POST autenticado a `/admin/cron` desde el cron que elijas.
-- No se ha publicado ni modificado Railway.
+El repositorio queda configurado para Railway. El archivo `railway.json` migra antes del arranque, usa Gunicorn escuchando en el puerto asignado por Railway y declara `/health` para la comprobación de salud.
+
+### Publicar la primera versión
+
+1. Sube la rama `desarrollo` a GitHub y en Railway crea un proyecto desde el repositorio `dtapia28/flask`, seleccionando esa rama. Configura el servicio web para desplegar desde la raíz del repositorio.
+2. En el proyecto Railway agrega PostgreSQL. En el servicio web crea `DATABASE_URL` como referencia a la variable `DATABASE_URL` del servicio PostgreSQL; así no se copia ni expone la contraseña de la base.
+3. En Variables del servicio web configura `APP_ENV=production`, `SECRET_KEY` y `CRON_SECRET` con valores aleatorios distintos de al menos 32 caracteres, `APP_URL=https://tapiaaraya.com/checklist`, `COOKIE_SECURE=true`, `MAIL_MODE=smtp`, `MAIL_FROM`, `SMTP_HOST`, `SMTP_PORT=587`, `SMTP_USER`, `SMTP_PASSWORD` y `ADMIN_EMAIL`. No uses los valores de ejemplo del `.env`.
+4. Añade el dominio que usarán las personas en Settings → Networking y habilita HTTPS. La aplicación admite tanto abrir la raíz del dominio como usar el prefijo `/checklist`; ajusta `APP_URL` a la dirección pública real que usarás. La navegación y los formularios conservan ese prefijo.
+5. Haz el primer deploy. Railway ejecutará `flask --app main db upgrade` antes de iniciar Gunicorn. Revisa los logs: un fallo de migración detiene el release. Cuando el deploy esté activo, abre `/health` y confirma que responde `ok`.
+6. En la base ya migrada crea el administrador una sola vez desde Railway → servicio web → Shell con `flask --app main create-admin`. Completa nombre, correo y contraseña en la consola. No uses `seed-demo` en producción.
+7. Crea un servicio Cron en Railway desde el mismo repositorio y rama, con el comando de inicio `flask --app main process-closures` y horario `*/5 * * * *`. Asigna a ese servicio la misma referencia `DATABASE_URL` y las mismas variables `APP_ENV`, `SECRET_KEY`, `APP_URL`, `CRON_SECRET`, `ADMIN_EMAIL`, `MAIL_MODE` y SMTP. Debe usar la base PostgreSQL del sitio.
+8. Entra con el administrador, crea los usuarios familiares, asigna listas y prueba desde un teléfono la invitación, inicio de sesión, marcado de tareas e historial.
+
+Los servicios Cron de Railway usan horario UTC; el código interpreta los cierres según `America/Santiago`. No es necesario mantener un worker encendido: el cron ejecuta el comando y termina. Revisa el costo vigente de Railway y del proveedor SMTP antes de habilitar el proyecto.
+
+No se publica ni se modifica Railway desde este cambio; solo queda preparado el código y la configuración versionada.
 
 ## Pruebas
 
