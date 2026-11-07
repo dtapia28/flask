@@ -5,7 +5,7 @@ from urllib.error import HTTPError, URLError
 from datetime import datetime, date, time, timedelta
 from zoneinfo import ZoneInfo
 from functools import wraps
-from flask import Flask, render_template, request, redirect, url_for, flash, abort
+from flask import Flask, render_template, request, redirect, url_for, flash, abort, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from flask_login import LoginManager, UserMixin, login_user, logout_user, current_user, login_required
@@ -61,7 +61,7 @@ class PrefixMiddleware:
 app.wsgi_app=PrefixMiddleware(app.wsgi_app)
 
 class User(UserMixin,db.Model):
- id=db.Column(db.Integer,primary_key=True); email=db.Column(db.String(255),unique=True,nullable=False); name=db.Column(db.String(120),nullable=False); password=db.Column(db.String(255),nullable=False); role=db.Column(db.String(20),default='user',nullable=False); active=db.Column(db.Boolean,default=True,nullable=False)
+ id=db.Column(db.Integer,primary_key=True); email=db.Column(db.String(255),unique=True,nullable=False); name=db.Column(db.String(120),nullable=False); password=db.Column(db.String(255),nullable=False); role=db.Column(db.String(20),default='user',nullable=False); active=db.Column(db.Boolean,default=True,nullable=False); password_configured=db.Column(db.Boolean,default=False,nullable=False)
  def get_id(self): return str(self.id)
  @property
  def is_active(self): return self.active
@@ -247,6 +247,7 @@ def admin():
  invite_statuses={int(m.key.split(':',1)[1]):m.status for m in MailLog.query.filter_by(kind='invite').all() if m.key and m.key.startswith('invite:') and m.key.split(':',1)[1].isdigit()}
  return render_template('admin.html',users=User.query.order_by(User.id).all(),lists=Checklist.query.order_by(Checklist.id).all(),assignments=Assignment.query.all(),records=query.order_by(DailyRecord.day.desc()).limit(500).all(),mails=MailLog.query.order_by(MailLog.sent_at.desc()).limit(100).all(),invite_statuses=invite_statuses)
 def claim_invitation_retry(user):
+ if user.password_configured: return False
  mail=MailLog.query.filter_by(key=f'invite:{user.id}').first()
  if not mail: return False
  if mail.status=='failed':
@@ -289,7 +290,8 @@ def add_user():
  email=request.form['email'].strip().lower()
  existing=User.query.filter_by(email=email).first()
  if existing:
-  if existing.role=='user' and claim_invitation_retry(existing): deliver_invitation(existing,claimed=True)
+  if existing.password_configured: flash('Ese usuario ya configuró su contraseña; puede ingresar o recuperar el acceso.')
+  elif existing.role=='user' and claim_invitation_retry(existing): deliver_invitation(existing,claimed=True)
   elif MailLog.query.filter_by(key=f'invite:{existing.id}',status='pending').first(): flash('La invitación sigue en curso. Espera dos minutos y vuelve a intentar.')
   else: flash('Ese correo ya existe.')
  else:
@@ -300,6 +302,9 @@ def add_user():
 def resend_invite(uid):
  user=db.get_or_404(User,uid)
  if user.role!='user': abort(404)
+ if user.password_configured:
+  flash('Esta persona ya configuró su contraseña. Puede recuperar el acceso desde la pantalla de ingreso.')
+  return redirect(url_for('admin'))
  mail=MailLog.query.filter_by(key=f'invite:{user.id}').first()
  if not mail or mail.status not in ('pending','failed'):
   flash('No hay una invitación pendiente para reenviar. Si la persona ya activó su cuenta, debe usar Recuperar contraseña.')
@@ -310,6 +315,26 @@ def resend_invite(uid):
  else:
   flash('No se puede reenviar esta invitación. Revisa su estado en el historial de correo.')
  return redirect(url_for('admin'))
+@app.post('/admin/user/<int:uid>/invitation-link')
+@admin_required
+def create_manual_invitation_link(uid):
+ user=db.get_or_404(User,uid)
+ if user.role!='user' or not user.active: abort(404)
+ if user.password_configured:
+  response=jsonify(error='Esta cuenta ya configuró su contraseña; no necesita una invitación nueva.')
+  response.status_code=409
+  response.headers['Cache-Control']='no-store, private'
+  return response
+ for old in Token.query.filter(Token.user_id==user.id,Token.used.is_(False),Token.purpose.in_(('setup','reset'))).all():
+  old.used=True; old.purpose='revoked'
+ raw=secrets.token_urlsafe(32)
+ db.session.add(Token(user_id=user.id,digest=hashlib.sha256(raw.encode()).hexdigest(),purpose='setup',expires=now()+timedelta(hours=2)))
+ db.session.commit()
+ response=jsonify(invitation_url=public_url(f'password/{raw}'),message='Se generó un enlace nuevo, válido por 2 horas. Los enlaces anteriores quedaron invalidados.')
+ response.headers['Cache-Control']='no-store, private'
+ response.headers['Pragma']='no-cache'
+ response.headers['Vary']='Cookie'
+ return response
 def create_token(u,purpose):
  raw=secrets.token_urlsafe(32); db.session.add(Token(user_id=u.id,digest=hashlib.sha256(raw.encode()).hexdigest(),purpose=purpose,expires=now()+timedelta(hours=2))); db.session.commit(); return raw
 @app.route('/admin/list',methods=['POST'])
@@ -384,7 +409,7 @@ def set_password(raw):
  if request.method=='POST':
   pw=request.form.get('password','')
   if len(pw)<8: flash('Usa al menos 8 caracteres.')
-  else: u=db.session.get(User,t.user_id); u.password=generate_password_hash(pw); t.used=True; db.session.commit(); flash('Contraseña guardada. Ya puedes ingresar.'); return redirect(url_for('login'))
+  else: u=db.session.get(User,t.user_id); u.password=generate_password_hash(pw); u.password_configured=True; t.used=True; db.session.commit(); flash('Contraseña guardada. Ya puedes ingresar.'); return redirect(url_for('login'))
  return render_template('password.html')
 @app.route('/forgot',methods=['GET','POST'])
 def forgot():
@@ -419,7 +444,7 @@ def create_admin_command():
  name=input('Nombre: ').strip(); email=input('Correo: ').strip().lower(); password=getpass.getpass('Contraseña (8+ caracteres): ')
  if len(password)<8: raise SystemExit('La contraseña debe tener al menos 8 caracteres.')
  if User.query.filter_by(email=email).first(): raise SystemExit('Ese correo ya existe.')
- db.session.add(User(name=name,email=email,password=generate_password_hash(password),role='admin')); db.session.commit(); print('Administrador creado.')
+ db.session.add(User(name=name,email=email,password=generate_password_hash(password),role='admin',password_configured=True)); db.session.commit(); print('Administrador creado.')
 
 
 @app.cli.command('seed-demo')
