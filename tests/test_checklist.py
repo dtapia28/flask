@@ -454,3 +454,62 @@ def test_stale_pending_invitation_can_be_retried_without_duplicate_user(client,m
   assert mail.status=='sent' and mail.attempts==2
   assert main.Token.query.filter_by(user_id=user_id,purpose='setup',used=False).count()==1
  assert len(calls)==1
+
+
+def test_admin_generates_manual_link_for_saved_pending_invite_and_user_can_login(client,monkeypatch,caplog):
+ c,ids=client; login(c,'admin@example.test')
+ user_id=ids[1]
+ monkeypatch.setenv('APP_URL','https://tapiaaraya.com/checklist')
+ monkeypatch.setenv('MAIL_MODE','zeptomail')
+ # Manual link generation must work even when the ZeptoMail key is absent or mail is pending.
+ monkeypatch.delenv('ZEPTOMAIL_API_KEY',raising=False)
+ with main.app.app_context():
+  user=main.db.session.get(main.User,user_id)
+  user.password_configured=False
+  old_raw='already-hashed-token'
+  old=main.Token(user_id=user_id,digest=main.hashlib.sha256(old_raw.encode()).hexdigest(),purpose='setup',expires=main.now()+main.timedelta(hours=1),used=False)
+  pending=main.MailLog(key=f'invite:{user_id}',recipient=user.email,kind='invite',body='[enlace temporal oculto]',status='pending',attempts=1,sent_at=main.now()-main.timedelta(seconds=15))
+  main.db.session.add_all([old,pending]); main.db.session.commit()
+ page=c.get('/admin')
+ assert b'Generar nuevo enlace' in page.data
+ response=c.post(f'/admin/user/{user_id}/invitation-link')
+ assert response.status_code==200
+ payload=response.get_json(); link=payload['invitation_url']; raw=link.rsplit('/',1)[1]
+ assert link.startswith('https://tapiaaraya.com/checklist/password/')
+ assert 'invalidados' in payload['message']
+ assert response.headers['Cache-Control']=='no-store, private'
+ assert raw not in caplog.text and link not in caplog.text
+ with main.app.app_context():
+  assert main.User.query.filter_by(email='user@example.test').count()==1
+  old=main.Token.query.filter_by(user_id=user_id,digest=main.hashlib.sha256(old_raw.encode()).hexdigest()).one()
+  assert old.used and old.purpose=='revoked'
+  new=main.Token.query.filter_by(user_id=user_id,purpose='setup',used=False).one()
+  assert new.digest==main.hashlib.sha256(raw.encode()).hexdigest()
+  expiry=new.expires if new.expires.tzinfo else new.expires.replace(tzinfo=main.TZ)
+  assert expiry>main.now()
+  mail=main.MailLog.query.filter_by(key=f'invite:{user_id}').one()
+  assert mail.status=='pending' and mail.attempts==1
+ set_response=c.post(f'/password/{raw}',data={'password':'fresh-pass-123'})
+ assert set_response.status_code==302
+ with main.app.app_context():
+  user=main.User.query.filter_by(email='user@example.test').one()
+  assert user.password_configured is True
+  assert main.User.query.filter_by(email='user@example.test').count()==1
+ assert c.post('/login',data={'email':'user@example.test','password':'fresh-pass-123'}).status_code==302
+ assert c.get('/today').status_code==200
+ admin_client=main.app.test_client(); login(admin_client,'admin@example.test')
+ assert b'Generar nuevo enlace' not in admin_client.get('/admin').data
+ denied=admin_client.post(f'/admin/user/{user_id}/invitation-link')
+ assert denied.status_code==409
+ with main.app.app_context():
+  assert main.Token.query.filter_by(user_id=user_id,purpose='setup',used=False).count()==0
+
+
+def test_manual_invitation_link_is_admin_only_and_for_active_unconfigured_users(client):
+ c,ids=client
+ login(c,'user@example.test')
+ assert c.post(f'/admin/user/{ids[1]}/invitation-link').status_code==403
+ with main.app.app_context():
+  user=main.db.session.get(main.User,ids[1]); user.active=False; main.db.session.commit()
+ admin_client=main.app.test_client(); login(admin_client,'admin@example.test')
+ assert admin_client.post(f'/admin/user/{ids[1]}/invitation-link').status_code==404
