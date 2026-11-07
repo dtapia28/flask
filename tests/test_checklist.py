@@ -92,6 +92,47 @@ def test_snapshot_is_unchanged_when_list_changes(client):
   main.db.session.add(main.Task(checklist_id=record.assignment.checklist_id,text='Nueva tarea')); main.db.session.commit()
   assert [s.text for s in main.db.session.get(main.DailyRecord,record.id).snapshots]==original
 
+def test_admin_review_paginates_without_filters_and_audits_detail_correction(client):
+ c,ids=client; login(c,'admin@example.test')
+ with main.app.app_context():
+  assignment=main.db.session.get(main.Assignment,ids[2])
+  for offset in range(23):
+   day=date(2026,1,1).fromordinal(date(2026,1,1).toordinal()+offset)
+   record=main.dayrecord(assignment,day); record.status='missed'; record.closed_at=datetime.combine(day,time(23,59),tzinfo=ZoneInfo('America/Santiago'))
+  main.db.session.commit()
+ response=c.get('/admin/review')
+ assert response.status_code==200 and response.data.count(b'href="/admin/record/')==20
+ assert 'Página 1 de 2'.encode() in response.data
+ with main.app.app_context(): rid=main.DailyRecord.query.order_by(main.DailyRecord.day.desc()).first().id
+ detail=c.get(f'/admin/record/{rid}?back=%2Fadmin%2Freview%3Fstatus%3Dmissed')
+ assert detail.status_code==200 and 'Motivo de corrección'.encode() in detail.data
+ with main.app.app_context(): snap=main.db.session.get(main.DailyRecord,rid).snapshots[0].id
+ result=c.post(f'/admin/record/{rid}',data={'task_'+str(snap):'on','reason':'Corrección revisada','back':'/admin/review?status=missed'})
+ assert result.status_code==302 and '/admin/review?status=missed' in result.location
+ with main.app.app_context():
+  assert main.ChangeLog.query.filter_by(record_id=rid).one().reason=='Corrección revisada'
+
+def test_user_removal_keeps_referenced_history(client):
+ c,ids=client; login(c,'admin@example.test')
+ with main.app.app_context():
+  assignment=main.db.session.get(main.Assignment,ids[2]); record=main.dayrecord(assignment,date(2026,1,1)); main.db.session.commit(); rid=record.id; uid=ids[1]
+ c.post(f'/admin/user/{uid}/delete')
+ with main.app.app_context():
+  user=main.db.session.get(main.User,uid)
+  assert user.deleted_at is not None and not user.active
+  assert main.db.session.get(main.DailyRecord,rid) is not None
+
+def test_assignment_schedule_change_is_effective_future_only(client):
+ c,ids=client; login(c,'admin@example.test')
+ old_day=date(2026,11,6); next_monday=date(2026,11,9)
+ result=c.post(f'/admin/assignment/{ids[2]}/edit',data={'weekdays':['0','1'],'close_time':'22:00'})
+ assert result.status_code==302
+ with main.app.app_context():
+  assignment=main.db.session.get(main.Assignment,ids[2])
+  assert main.schedule_for(assignment,old_day).weekdays=='0,1,2,3,4,5,6'
+  assert main.schedule_for(assignment,next_monday).weekdays=='0,1'
+  assert main.schedule_for(assignment,next_monday).close_time==time(22,0)
+
 def test_another_user_cannot_toggle_record(client):
  c,ids=client
  with main.app.app_context():

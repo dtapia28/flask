@@ -61,16 +61,18 @@ class PrefixMiddleware:
 app.wsgi_app=PrefixMiddleware(app.wsgi_app)
 
 class User(UserMixin,db.Model):
- id=db.Column(db.Integer,primary_key=True); email=db.Column(db.String(255),unique=True,nullable=False); name=db.Column(db.String(120),nullable=False); password=db.Column(db.String(255),nullable=False); role=db.Column(db.String(20),default='user',nullable=False); active=db.Column(db.Boolean,default=True,nullable=False); password_configured=db.Column(db.Boolean,default=False,nullable=False)
+ id=db.Column(db.Integer,primary_key=True); email=db.Column(db.String(255),unique=True,nullable=False); name=db.Column(db.String(120),nullable=False); password=db.Column(db.String(255),nullable=False); role=db.Column(db.String(20),default='user',nullable=False); active=db.Column(db.Boolean,default=True,nullable=False); password_configured=db.Column(db.Boolean,default=False,nullable=False); deleted_at=db.Column(db.DateTime)
  def get_id(self): return str(self.id)
  @property
  def is_active(self): return self.active
 class Checklist(db.Model):
- id=db.Column(db.Integer,primary_key=True); name=db.Column(db.String(160),nullable=False); description=db.Column(db.Text,default=''); active=db.Column(db.Boolean,default=True)
+ id=db.Column(db.Integer,primary_key=True); name=db.Column(db.String(160),nullable=False); description=db.Column(db.Text,default=''); active=db.Column(db.Boolean,default=True); archived_at=db.Column(db.DateTime); tasks=db.relationship('Task',backref='checklist',order_by='Task.position'); assignments=db.relationship('Assignment',back_populates='checklist')
 class Task(db.Model):
  id=db.Column(db.Integer,primary_key=True); checklist_id=db.Column(db.ForeignKey('checklist.id'),nullable=False); section=db.Column(db.String(160),nullable=False,default='General'); text=db.Column(db.String(300),nullable=False); position=db.Column(db.Integer,default=0); active=db.Column(db.Boolean,default=True)
 class Assignment(db.Model):
- id=db.Column(db.Integer,primary_key=True); user_id=db.Column(db.ForeignKey('user.id'),nullable=False); checklist_id=db.Column(db.ForeignKey('checklist.id'),nullable=False); start_date=db.Column(db.Date,nullable=False); weekdays=db.Column(db.String(20),default='0,1,2,3,4,5,6'); close_time=db.Column(db.Time,default=time(23,59)); paused=db.Column(db.Boolean,default=False); alert_admin=db.Column(db.Boolean,default=False); alert_from=db.Column(db.Date,default=lambda:now().date()); checklist=db.relationship(Checklist); user=db.relationship(User)
+ id=db.Column(db.Integer,primary_key=True); user_id=db.Column(db.ForeignKey('user.id'),nullable=False); checklist_id=db.Column(db.ForeignKey('checklist.id'),nullable=False); start_date=db.Column(db.Date,nullable=False); weekdays=db.Column(db.String(20),default='0,1,2,3,4,5,6'); close_time=db.Column(db.Time,default=time(23,59)); paused=db.Column(db.Boolean,default=False); alert_admin=db.Column(db.Boolean,default=False); alert_from=db.Column(db.Date,default=lambda:now().date()); ended_at=db.Column(db.DateTime); checklist=db.relationship(Checklist,back_populates='assignments'); user=db.relationship(User)
+class AssignmentSchedule(db.Model):
+ id=db.Column(db.Integer,primary_key=True); assignment_id=db.Column(db.ForeignKey('assignment.id'),nullable=False); effective_from=db.Column(db.Date,nullable=False); weekdays=db.Column(db.String(20),nullable=False); close_time=db.Column(db.Time,nullable=False); alert_admin=db.Column(db.Boolean,nullable=False,default=False); paused=db.Column(db.Boolean,nullable=False,default=False); assignment=db.relationship(Assignment)
 class TaskSnapshot(db.Model):
  id=db.Column(db.Integer,primary_key=True); record_id=db.Column(db.ForeignKey('daily_record.id'),nullable=False); task_id=db.Column(db.Integer); section=db.Column(db.String(160),nullable=False,default='General'); text=db.Column(db.String(300),nullable=False); done=db.Column(db.Boolean,default=False)
 class DailyRecord(db.Model):
@@ -158,7 +160,20 @@ def dayrecord(assignment,day):
   for task in tasks: db.session.add(TaskSnapshot(record_id=rec.id,task_id=task.id,section=task.section,text=task.text))
   db.session.flush()
  return rec
-def scheduled(a,d): return not a.paused and d>=a.start_date and d.weekday() in [int(x) for x in a.weekdays.split(',') if x]
+def schedule_for(a,d):
+ change=AssignmentSchedule.query.filter(AssignmentSchedule.assignment_id==a.id,AssignmentSchedule.effective_from<=d).order_by(AssignmentSchedule.effective_from.desc()).first()
+ return change or a
+app.jinja_env.globals['schedule_for']=schedule_for
+app.jinja_env.globals['now']=now
+def ordered_sections(checklist):
+ grouped={}
+ for task in checklist.tasks:
+  if task.active: grouped.setdefault(task.section,[]).append(task)
+ return list(grouped.items())
+app.jinja_env.globals['ordered_sections']=ordered_sections
+def scheduled(a,d):
+ schedule=schedule_for(a,d)
+ return not schedule.paused and (not a.ended_at or d<=a.ended_at.astimezone(TZ).date()) and d>=a.start_date and d.weekday() in [int(x) for x in schedule.weekdays.split(',') if x]
 def evaluate_closures(until=None):
  until=until or now(); today=until.astimezone(TZ).date(); assignments=Assignment.query.all(); changed=0
  for a in assignments:
@@ -166,7 +181,7 @@ def evaluate_closures(until=None):
   d=a.start_date
   while d<=today:
    if scheduled(a,d):
-    close=datetime.combine(d,a.close_time,tzinfo=TZ)
+    close=datetime.combine(d,schedule_for(a,d).close_time,tzinfo=TZ)
     if close<=until:
      rec=dayrecord(a,d)
      if rec.status=='open':
@@ -185,11 +200,13 @@ def evaluate_closures(until=None):
    try: send_mail(u.email,'Checklist familiar: tareas pendientes',body,f'user:{u.id}:{day}')
    except Exception: app.logger.exception('Error de correo de usuario')
  # Seven consecutive scheduled misses; activation date fences retroactive counting; one key per run boundary.
- for a in Assignment.query.filter_by(alert_admin=True).all():
+ for a in Assignment.query.all():
   run=[]; alerted_in_run=False; d=a.alert_from
   while d<=today:
    if not scheduled(a,d): run=[]; alerted_in_run=False
    else:
+    if not schedule_for(a,d).alert_admin or d<a.alert_from:
+     run=[]; alerted_in_run=False; d+=timedelta(days=1); continue
     rec=DailyRecord.query.filter_by(assignment_id=a.id,day=d).first()
     if rec and rec.status=='missed' and rec.closed_at and (rec.closed_at.replace(tzinfo=TZ) if rec.closed_at.tzinfo is None else rec.closed_at)<=until: run.append(d)
     else: run=[]; alerted_in_run=False
@@ -217,7 +234,7 @@ def logout(): logout_user(); return redirect(url_for('home'))
 @login_required
 def today():
  d=now().date(); items=[]
- for a in Assignment.query.filter_by(user_id=current_user.id,paused=False).all():
+ for a in Assignment.query.filter_by(user_id=current_user.id,ended_at=None).all():
   if scheduled(a,d): items.append((a,dayrecord(a,d)))
  db.session.commit(); return render_template('today.html',items=items,day=d)
 @app.post('/record/<int:rid>/task/<int:sid>')
@@ -235,17 +252,53 @@ def toggle(rid,sid):
 @app.get('/history')
 @login_required
 def history():
- records=DailyRecord.query.join(Assignment).filter(Assignment.user_id==current_user.id).order_by(DailyRecord.day.desc()).limit(180).all(); return render_template('history.html',records=records)
+ page=max(1,request.args.get('page',1,type=int)); q=DailyRecord.query.join(Assignment).filter(Assignment.user_id==current_user.id)
+ pagination=q.order_by(DailyRecord.day.desc(),DailyRecord.id.desc()).paginate(page=page,per_page=20,error_out=False)
+ return render_template('history.html',pagination=pagination,records=pagination.items)
 @app.get('/admin')
 @admin_required
 def admin():
- query=DailyRecord.query.join(Assignment)
- if request.args.get('user_id'): query=query.filter(Assignment.user_id==request.args.get('user_id',type=int))
- if request.args.get('checklist_id'): query=query.filter(Assignment.checklist_id==request.args.get('checklist_id',type=int))
- if request.args.get('from'): query=query.filter(DailyRecord.day>=date.fromisoformat(request.args['from']))
- if request.args.get('to'): query=query.filter(DailyRecord.day<=date.fromisoformat(request.args['to']))
+ return admin_users()
+@app.get('/admin/users')
+@admin_required
+def admin_users():
+ users=User.query.filter_by(deleted_at=None).order_by(User.name,User.id).all()
  invite_statuses={int(m.key.split(':',1)[1]):m.status for m in MailLog.query.filter_by(kind='invite').all() if m.key and m.key.startswith('invite:') and m.key.split(':',1)[1].isdigit()}
- return render_template('admin.html',users=User.query.order_by(User.id).all(),lists=Checklist.query.order_by(Checklist.id).all(),assignments=Assignment.query.all(),records=query.order_by(DailyRecord.day.desc()).limit(500).all(),mails=MailLog.query.order_by(MailLog.sent_at.desc()).limit(100).all(),invite_statuses=invite_statuses)
+ edit_id=request.args.get('edit',type=int)
+ return render_template('admin_users.html',users=users,invite_statuses=invite_statuses,edit_user=db.session.get(User,edit_id) if edit_id else None)
+@app.get('/admin/lists')
+@admin_required
+def admin_lists():
+ lists=Checklist.query.order_by(Checklist.archived_at.isnot(None),Checklist.name).all()
+ edit_id=request.args.get('edit',type=int); selected=db.session.get(Checklist,edit_id) if edit_id else None
+ return render_template('admin_lists.html',lists=lists,selected=selected,assignments=Assignment.query.filter(Assignment.ended_at.is_(None)).all())
+@app.get('/admin/assignments')
+@admin_required
+def admin_assignments():
+ edit_id=request.args.get('edit',type=int)
+ return render_template('admin_assignments.html',assignments=Assignment.query.order_by(Assignment.ended_at.isnot(None),Assignment.start_date.desc()).all(),users=User.query.filter_by(active=True,deleted_at=None,role='user').all(),lists=Checklist.query.filter_by(active=True).all(),edit=db.session.get(Assignment,edit_id) if edit_id else None)
+@app.get('/admin/review')
+@admin_required
+def admin_review():
+ query=DailyRecord.query.join(Assignment).join(Checklist,Assignment.checklist_id==Checklist.id).join(User,Assignment.user_id==User.id)
+ vals={key:request.args.get(key,'').strip() for key in ('user_id','checklist_id','from','to','status')}
+ if vals['user_id'].isdigit(): query=query.filter(Assignment.user_id==int(vals['user_id']))
+ if vals['checklist_id'].isdigit(): query=query.filter(Assignment.checklist_id==int(vals['checklist_id']))
+ try:
+  if vals['from']: query=query.filter(DailyRecord.day>=date.fromisoformat(vals['from']))
+  if vals['to']: query=query.filter(DailyRecord.day<=date.fromisoformat(vals['to']))
+ except ValueError: abort(400)
+ status_map={'done':'done','pending':'open','missed':'missed'}
+ if vals['status'] in status_map: query=query.filter(DailyRecord.status==status_map[vals['status']])
+ page=max(1,request.args.get('page',1,type=int)); pagination=query.order_by(DailyRecord.day.desc(),DailyRecord.id.desc()).paginate(page=page,per_page=20,error_out=False)
+ users=User.query.filter_by(deleted_at=None).order_by(User.name).all(); lists=Checklist.query.order_by(Checklist.name).all()
+ return render_template('admin_review.html',pagination=pagination,records=pagination.items,users=users,lists=lists,filters=vals,mails=MailLog.query.order_by(MailLog.sent_at.desc()).limit(100).all(),mail_view=request.args.get('view')=='mail')
+@app.get('/admin/record/<int:rid>')
+@admin_required
+def admin_record(rid):
+ rec=db.get_or_404(DailyRecord,rid); back=request.args.get('back') or url_for('admin_review')
+ if not back.startswith('/') or back.startswith('//'): back=url_for('admin_review')
+ return render_template('admin_record.html',record=rec,back=back)
 def claim_invitation_retry(user):
  if user.password_configured: return False
  mail=MailLog.query.filter_by(key=f'invite:{user.id}').first()
@@ -296,7 +349,28 @@ def add_user():
   else: flash('Ese correo ya existe.')
  else:
   u=User(email=email,name=request.form['name'].strip(),password=generate_password_hash(secrets.token_urlsafe(32))); db.session.add(u); db.session.commit(); deliver_invitation(u)
- return redirect(url_for('admin'))
+ return redirect(url_for('admin_users'))
+@app.post('/admin/user/<int:uid>/edit')
+@admin_required
+def edit_user(uid):
+ u=db.get_or_404(User,uid); name=request.form.get('name','').strip(); email=request.form.get('email','').strip().lower()
+ if not name or not email or User.query.filter(User.email==email,User.id!=uid).first(): flash('Revisa nombre y correo; el correo debe ser único.')
+ else: u.name=name; u.email=email; db.session.commit()
+ return redirect(url_for('admin_users'))
+@app.post('/admin/user/<int:uid>/delete')
+@admin_required
+def delete_user(uid):
+ u=db.get_or_404(User,uid)
+ if u.role=='admin' and u.active and User.query.filter_by(role='admin',active=True,deleted_at=None).count()<=1:
+  flash('No puedes eliminar al último administrador activo.'); return redirect(url_for('admin_users'))
+ referenced=Assignment.query.filter_by(user_id=uid).first() is not None or DailyRecord.query.join(Assignment).filter(Assignment.user_id==uid).first() is not None
+ if referenced:
+  u.deleted_at=now(); u.active=False
+  for a in Assignment.query.filter_by(user_id=uid,ended_at=None).all(): a.paused=True; a.ended_at=now()
+  flash('Usuario dado de baja. Se conservan su historial y asignaciones; las asignaciones vigentes quedaron pausadas.')
+ else:
+  Token.query.filter_by(user_id=uid).delete(synchronize_session=False); db.session.delete(u); flash('Usuario eliminado definitivamente; no tenía historial ni asignaciones.')
+ db.session.commit(); return redirect(url_for('admin_users'))
 @app.post('/admin/user/<int:uid>/resend-invite')
 @admin_required
 def resend_invite(uid):
@@ -304,7 +378,7 @@ def resend_invite(uid):
  if user.role!='user': abort(404)
  if user.password_configured:
   flash('Esta persona ya configuró su contraseña. Puede recuperar el acceso desde la pantalla de ingreso.')
-  return redirect(url_for('admin'))
+  return redirect(url_for('admin_users'))
  mail=MailLog.query.filter_by(key=f'invite:{user.id}').first()
  if not mail or mail.status not in ('pending','failed'):
   flash('No hay una invitación pendiente para reenviar. Si la persona ya activó su cuenta, debe usar Recuperar contraseña.')
@@ -314,7 +388,7 @@ def resend_invite(uid):
   flash('La invitación sigue en curso o acaba de intentarse. Espera dos minutos y vuelve a intentar.')
  else:
   flash('No se puede reenviar esta invitación. Revisa su estado en el historial de correo.')
- return redirect(url_for('admin'))
+ return redirect(url_for('admin_users'))
 @app.post('/admin/user/<int:uid>/invitation-link')
 @admin_required
 def create_manual_invitation_link(uid):
@@ -375,31 +449,92 @@ def add_list():
   flash('Agrega al menos un elemento en una sección.'); return redirect(url_for('admin'))
  c=Checklist(name=request.form['name'],description=request.form.get('description','')); db.session.add(c); db.session.flush()
  for position,(section,text) in enumerate(entries): db.session.add(Task(checklist_id=c.id,section=section,text=text,position=position))
- db.session.commit(); return redirect(url_for('admin'))
+ db.session.commit(); return redirect(url_for('admin_lists'))
+@app.post('/admin/list/<int:cid>/edit')
+@admin_required
+def edit_list(cid):
+ c=db.get_or_404(Checklist,cid)
+ try: sections=json.loads(request.form.get('sections_json','[]'))
+ except (TypeError,ValueError): flash('No se pudieron leer las secciones.'); return redirect(url_for('admin_lists'))
+ entries=[]
+ if isinstance(sections,list):
+  for item in sections:
+   if isinstance(item,dict) and isinstance(item.get('items',''),str):
+    entries.extend((str(item.get('name','')).strip(),line.strip()) for line in item['items'].splitlines() if line.strip())
+ if not entries or any(not sec or len(sec)>160 or len(text)>300 for sec,text in entries): flash('Agrega tareas con sección y respeta los límites de caracteres.'); return redirect(url_for('admin_lists',edit=cid))
+ c.name=request.form.get('name','').strip(); c.description=request.form.get('description','').strip()
+ for task in Task.query.filter_by(checklist_id=cid).all(): task.active=False
+ for pos,(section,text) in enumerate(entries): db.session.add(Task(checklist_id=cid,section=section,text=text,position=pos,active=True))
+ db.session.commit(); flash('Lista guardada. Las ejecuciones existentes conservan sus tareas originales.'); return redirect(url_for('admin_lists'))
+@app.post('/admin/list/<int:cid>/delete')
+@admin_required
+def delete_list(cid):
+ c=db.get_or_404(Checklist,cid); referenced=Assignment.query.filter_by(checklist_id=cid).first() is not None
+ if referenced:
+  c.active=False; c.archived_at=now()
+  for a in Assignment.query.filter_by(checklist_id=cid,ended_at=None).all(): a.paused=True
+  flash('Lista archivada; sus asignaciones vigentes quedaron pausadas. El historial se conserva.')
+ else:
+  Task.query.filter_by(checklist_id=cid).delete(synchronize_session=False); db.session.delete(c); flash('Lista eliminada definitivamente; no tenía asignaciones.')
+ db.session.commit(); return redirect(url_for('admin_lists'))
 @app.post('/admin/assign')
 @admin_required
 def assign():
- a=Assignment(user_id=int(request.form['user_id']),checklist_id=int(request.form['checklist_id']),start_date=date.fromisoformat(request.form['start_date']),weekdays=','.join(request.form.getlist('weekdays')),close_time=time.fromisoformat(request.form['close_time']),alert_admin='alert_admin' in request.form,alert_from=now().date()); db.session.add(a); db.session.commit(); return redirect(url_for('admin'))
+ u=db.get_or_404(User,request.form.get('user_id',type=int)); c=db.get_or_404(Checklist,request.form.get('checklist_id',type=int))
+ if u.deleted_at or not u.active or c.archived_at: abort(400)
+ a=Assignment(user_id=u.id,checklist_id=c.id,start_date=date.fromisoformat(request.form['start_date']),weekdays=','.join(request.form.getlist('weekdays')),close_time=time.fromisoformat(request.form['close_time']),alert_admin='alert_admin' in request.form,alert_from=now().date()); db.session.add(a); db.session.commit(); return redirect(url_for('admin_assignments'))
+@app.post('/admin/assignment/<int:aid>/edit')
+@admin_required
+def edit_assignment(aid):
+ a=db.get_or_404(Assignment,aid)
+ if not a.ended_at:
+  weekdays=','.join(request.form.getlist('weekdays')); alert='alert_admin' in request.form; effective=now().date()+timedelta(days=1)
+  change=AssignmentSchedule.query.filter_by(assignment_id=a.id,effective_from=effective).first()
+  if not change: change=AssignmentSchedule(assignment_id=a.id,effective_from=effective); db.session.add(change)
+  change.weekdays=weekdays; change.close_time=time.fromisoformat(request.form['close_time']); change.alert_admin=alert; change.paused=schedule_for(a,now().date()).paused
+  flash(f'Programación guardada desde {effective}; los días anteriores conservan su programación.')
+  db.session.commit()
+ return redirect(url_for('admin_assignments'))
+@app.post('/admin/assignment/<int:aid>/end')
+@admin_required
+def end_assignment(aid):
+ a=db.get_or_404(Assignment,aid)
+ if not a.ended_at: a.ended_at=now(); a.paused=True; db.session.commit()
+ return redirect(url_for('admin_assignments'))
 @app.post('/admin/pause/<int:aid>')
 @admin_required
-def pause(aid): a=db.get_or_404(Assignment,aid); a.paused=not a.paused; db.session.commit(); return redirect(url_for('admin'))
+def pause(aid):
+ a=db.get_or_404(Assignment,aid); current=schedule_for(a,now().date()); effective=now().date()+timedelta(days=1)
+ change=AssignmentSchedule.query.filter_by(assignment_id=a.id,effective_from=effective).first()
+ if not change: change=AssignmentSchedule(assignment_id=a.id,effective_from=effective); db.session.add(change)
+ change.weekdays=current.weekdays; change.close_time=current.close_time; change.alert_admin=current.alert_admin; change.paused=not current.paused
+ db.session.commit(); return redirect(url_for('admin_assignments'))
 @app.post('/admin/assignment/<int:aid>/alert')
 @admin_required
 def toggle_admin_alert(aid):
- a=db.get_or_404(Assignment,aid); a.alert_admin=not a.alert_admin
- if a.alert_admin: a.alert_from=now().date()
- db.session.commit(); return redirect(url_for('admin'))
+ a=db.get_or_404(Assignment,aid); current=schedule_for(a,now().date()); effective=now().date()+timedelta(days=1)
+ change=AssignmentSchedule.query.filter_by(assignment_id=a.id,effective_from=effective).first()
+ if not change: change=AssignmentSchedule(assignment_id=a.id,effective_from=effective); db.session.add(change)
+ change.weekdays=current.weekdays; change.close_time=current.close_time; change.alert_admin=not current.alert_admin; change.paused=current.paused
+ if change.alert_admin: a.alert_from=effective
+ db.session.commit(); return redirect(url_for('admin_assignments'))
 @app.post('/admin/record/<int:rid>')
 @admin_required
 def amend(rid):
  rec=db.get_or_404(DailyRecord,rid); reason=request.form.get('reason','').strip()
- if rec.status!='open' and not reason: flash('Indica el motivo de la corrección.'); return redirect(url_for('admin'))
+ if rec.status!='open' and not reason: flash('Indica el motivo de la corrección.'); return redirect(url_for('admin_record',rid=rid))
  was_open=rec.status=='open'
  previous='; '.join(f'{s.section}/{s.text}:{s.done}' for s in rec.snapshots); db.session.add(ChangeLog(record_id=rid,actor_id=current_user.id,reason=reason,previous=previous))
  for s in rec.snapshots: s.done=(f"task_{s.id}" in request.form)
  rec.status='done' if all(s.done for s in rec.snapshots) else 'missed'
  if was_open: rec.closed_at=now()
- db.session.commit(); return redirect(url_for('admin'))
+ db.session.commit(); return redirect(request.form.get('back') or url_for('admin_record',rid=rid))
+@app.get('/record/<int:rid>')
+@login_required
+def personal_record(rid):
+ rec=db.get_or_404(DailyRecord,rid)
+ if rec.assignment.user_id!=current_user.id: abort(404)
+ return render_template('personal_record.html',record=rec)
 @app.route('/password/<raw>',methods=['GET','POST'])
 def set_password(raw):
  # Only the digest is stored; raw token is high-entropy, temporary, and single-use.
@@ -433,8 +568,8 @@ def health(): return 'ok',200
 @admin_required
 def toggle_user(uid):
  u=db.get_or_404(User,uid)
- if u.id==current_user.id: abort(400)
- u.active=not u.active; db.session.commit(); return redirect(url_for('admin'))
+ if u.role=='admin' and u.active and User.query.filter_by(role='admin',active=True,deleted_at=None).count()<=1: flash('No puedes desactivar al último administrador activo.'); return redirect(url_for('admin_users'))
+ u.active=not u.active; db.session.commit(); return redirect(url_for('admin_users'))
 
 @app.cli.command('create-admin')
 def create_admin_command():
@@ -469,6 +604,10 @@ def seed_demo_command():
  if not user:
   user=User(name='Usuario de prueba',email=user_email,password=generate_password_hash(secrets.token_urlsafe(32)),role='user'); db.session.add(user)
  elif user.role!='user': raise click.ClickException(f'{user_email} ya existe y no es usuario.')
+ pending_email=os.environ.get('DEMO_PENDING_EMAIL','demo-pending@example.test').strip().lower()
+ pending=User.query.filter_by(email=pending_email).first()
+ if not pending:
+  pending=User(name='Invitación pendiente',email=pending_email,password=generate_password_hash(secrets.token_urlsafe(32)),role='user',password_configured=False); db.session.add(pending)
  checklist=Checklist.query.filter_by(name='Lista de ejemplo para pruebas').first()
  if not checklist:
   checklist=Checklist(name='Lista de ejemplo para pruebas',description='Datos locales de demostración'); db.session.add(checklist); db.session.flush()
@@ -477,11 +616,24 @@ def seed_demo_command():
  db.session.flush()
  assignment=Assignment.query.filter_by(user_id=user.id,checklist_id=checklist.id).first()
  if not assignment:
-  assignment=Assignment(user_id=user.id,checklist_id=checklist.id,start_date=now().date(),weekdays='0,1,2,3,4,5,6',close_time=time(23,59)); db.session.add(assignment)
+  assignment=Assignment(user_id=user.id,checklist_id=checklist.id,start_date=now().date()-timedelta(days=45),weekdays='0,1,2,3,4,5,6',close_time=time(23,59)); db.session.add(assignment)
+ db.session.flush()
+ second=Checklist.query.filter_by(name='Lista de ejemplo · Casa').first()
+ if not second:
+  second=Checklist(name='Lista de ejemplo · Casa',description='Segunda lista local de demostración'); db.session.add(second); db.session.flush()
+  for pos,(section,label) in enumerate([('Cocina','Ordenar la mesa'),('Cocina','Lavar lo usado'),('Mascotas','Revisar agua'),('Cierre','Dejar lista la mochila')]): db.session.add(Task(checklist_id=second.id,section=section,text=label,position=pos))
+ if not Assignment.query.filter_by(user_id=user.id,checklist_id=second.id).first(): db.session.add(Assignment(user_id=user.id,checklist_id=second.id,start_date=now().date()-timedelta(days=45),weekdays='0,1,2,3,4,5,6',close_time=time(21,30)))
+ # Populate actual daily executions so the server-side review and history pagination can be inspected locally.
+ for offset in range(1,26):
+  day=now().date()-timedelta(days=offset); record=dayrecord(assignment,day)
+  if record.status=='open':
+   for snap in record.snapshots: snap.done=(offset%4!=0 or snap.id%2==0)
+   record.status='done' if all(snap.done for snap in record.snapshots) else 'missed'
+   record.closed_at=datetime.combine(day,assignment.close_time,tzinfo=TZ)
  db.session.flush()
  base_url=os.environ.get('APP_URL',f"http://localhost:{os.environ.get('PORT','5000')}").rstrip('/')
  links=[]
- for person,purpose in ((admin,'setup'),(user,'setup')):
+ for person,purpose in ((admin,'setup'),(user,'setup'),(pending,'setup')):
   for old in Token.query.filter_by(user_id=person.id,purpose='setup',used=False).all(): old.used=True
   raw=secrets.token_urlsafe(32)
   db.session.add(Token(user_id=person.id,digest=hashlib.sha256(raw.encode()).hexdigest(),purpose=purpose,expires=now()+timedelta(hours=2)))
@@ -490,7 +642,8 @@ def seed_demo_command():
  click.echo('Datos demo creados o ya existentes en esta base SQLite.')
  click.echo(f'Admin de prueba: {links[0][0]} · enlace temporal (2 horas): {links[0][1]}')
  click.echo(f'Usuario de prueba: {links[1][0]} · enlace temporal (2 horas): {links[1][1]}')
- click.echo(f'Lista asignada: {checklist.name}')
+ click.echo(f'Cuenta pendiente para enlace manual: {pending.email}')
+ click.echo(f'Listas de prueba: {checklist.name} y {second.name} · 25 ejecuciones para revisar paginación')
 
 @app.cli.command('process-closures')
 def process_closures_command():
