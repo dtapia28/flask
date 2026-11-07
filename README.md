@@ -28,7 +28,9 @@ Después de aplicar `flask --app main db upgrade`, y con `SECRET_KEY` y `DATABAS
 
 ## Correo y evaluación de cierres
 
-Desarrollo usa `MAIL_MODE=console`: los mensajes quedan registrados y se escriben en el log local, sin entregarse. Producción requiere `MAIL_MODE=smtp`, `MAIL_FROM`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, y `ADMIN_EMAIL`. SMTP debe permitir STARTTLS.
+Desarrollo usa `MAIL_MODE=console`: no envía correo y oculta enlaces temporales en el log. En producción se recomienda `MAIL_MODE=zeptomail`, que envía por HTTPS. Requiere `MAIL_FROM` con un remitente verificado en ZeptoMail, `ZEPTOMAIL_API_KEY` (Send API key del Agent) y `ADMIN_EMAIL`. Verifica el dominio emisor y genera la clave en ZeptoMail → Agent → SMTP/API → API. El endpoint predeterminado es `https://cpaas.zoho.com/v1.1/email`; define `ZEPTOMAIL_API_URL` solo si tu cuenta usa otra región. La API tiene timeout de cinco segundos. Como alternativa en entornos que permitan SMTP, `MAIL_MODE=smtp` usa `MAIL_FROM`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD` y STARTTLS con timeout de cinco segundos. Consulta la [documentación oficial de envío por API de ZeptoMail](https://www.zoho.com/cpaas/help/api/email-sending.html).
+
+Una invitación fallida deja al usuario guardado y una fila `failed` o `pending` en el historial de correo. En Administración → Usuarios aparece **Reenviar invitación**. El reenvío reutiliza la cuenta, invalida enlaces setup antiguos y crea uno nuevo. Si un envío aparece `pending`, espera dos minutos antes de reintentar para evitar dos envíos simultáneos. Reenviar el mismo correo en el formulario de invitación también recupera invitaciones fallidas o pendientes, sin duplicar usuarios. Los enlaces no se guardan en el historial ni se escriben en los logs.
 
 Cierres/envíos se procesan con `flask --app main process-closures`, que cierra los registros vencidos, manda los correos configurados y termina. Programa una ejecución cada 5 minutos en el servicio cron de Railway. El comando también puede ejecutarse manualmente en local. El endpoint autenticado `POST /admin/cron` sigue disponible para un cron HTTP externo. Los cierres atrasados usan la fecha local real; los correos quedan deduplicados en la base.
 
@@ -40,11 +42,11 @@ El servicio web usa Gunicorn y el puerto que asigna Railway. Configura la migrac
 
 1. En Railway crea un proyecto desde el repositorio `dtapia28/flask`, seleccionando la rama `desarrollo`. Configura el servicio web para desplegar desde la raíz del repositorio. Railway detecta Python y crea el build automáticamente.
 2. En el proyecto Railway agrega PostgreSQL. En el servicio web crea `DATABASE_URL` como referencia a la variable `DATABASE_URL` del servicio PostgreSQL; así no se copia ni expone la contraseña de la base.
-3. En Variables del servicio web configura `APP_ENV=production`, `SECRET_KEY` y `CRON_SECRET` con valores aleatorios distintos de al menos 32 caracteres, `APP_URL=https://tapiaaraya.com/checklist`, `COOKIE_SECURE=true`, `MAIL_MODE=smtp`, `MAIL_FROM`, `SMTP_HOST`, `SMTP_PORT=587`, `SMTP_USER`, `SMTP_PASSWORD` y `ADMIN_EMAIL`. No uses los valores de ejemplo del `.env`.
+3. En Variables del servicio web configura `APP_ENV=production`, `SECRET_KEY` y `CRON_SECRET` con valores aleatorios distintos de al menos 32 caracteres, `APP_URL=https://tapiaaraya.com/checklist`, `COOKIE_SECURE=true`, `MAIL_MODE=zeptomail`, `MAIL_FROM` como remitente verificado en ZeptoMail, `ZEPTOMAIL_API_KEY` como Send API key de un Agent, y `ADMIN_EMAIL`. Opcionalmente define `ZEPTOMAIL_API_URL` si tu cuenta utiliza otra región. No uses los valores de ejemplo del `.env`.
 4. Añade el dominio que usarán las personas en Settings → Networking y habilita HTTPS. La aplicación admite tanto abrir la raíz del dominio como usar el prefijo `/checklist`; ajusta `APP_URL` a la dirección pública real que usarás. La navegación y los formularios conservan ese prefijo.
 5. En Settings del servicio web define **Pre-deploy command** como `flask --app main db upgrade`, **Start command** como `gunicorn --bind 0.0.0.0:$PORT main:app` y **Healthcheck path** como `/health`. Haz el primer deploy. Revisa los logs: un fallo de migración debe detener el release. Cuando el deploy esté activo, abre `/health` y confirma que responde `ok`.
 6. En la base ya migrada crea el administrador una sola vez desde Railway → servicio web → Shell con `flask --app main create-admin`. Completa nombre, correo y contraseña en la consola. No uses `seed-demo` en producción.
-7. Crea un segundo servicio desde el mismo repositorio y rama. En Settings pon el **Start command** `flask --app main process-closures` y el **Cron schedule** `*/5 * * * *`. Asigna a ese servicio la misma referencia `DATABASE_URL` y las mismas variables `APP_ENV`, `SECRET_KEY`, `APP_URL`, `CRON_SECRET`, `ADMIN_EMAIL`, `MAIL_MODE` y SMTP. Debe usar la base PostgreSQL del sitio y terminar después de cada ejecución.
+7. Crea un segundo servicio desde el mismo repositorio y rama. En Settings pon el **Start command** `flask --app main process-closures` y el **Cron schedule** `*/5 * * * *`. Asigna a ese servicio la misma referencia `DATABASE_URL` y las mismas variables `APP_ENV`, `SECRET_KEY`, `APP_URL`, `CRON_SECRET`, `ADMIN_EMAIL`, `MAIL_MODE`, `MAIL_FROM` y `ZEPTOMAIL_API_KEY` (más `ZEPTOMAIL_API_URL` si la definiste). Debe usar la base PostgreSQL del sitio y terminar después de cada ejecución.
 8. Entra con el administrador, crea los usuarios familiares, asigna listas y prueba desde un teléfono la invitación, inicio de sesión, marcado de tareas e historial.
 
 Los servicios Cron de Railway usan horario UTC; el código interpreta los cierres según `America/Santiago`. No es necesario mantener un worker encendido: el cron ejecuta el comando y termina. Revisa el costo vigente de Railway y del proveedor SMTP antes de habilitar el proyecto.
@@ -53,7 +55,7 @@ Railway está retirando su configuración `railway.json` para servicios nuevos, 
 
 ## Pruebas
 
-Ejecuta `python -m pytest -q` para validar permisos, persistencia, cierres de Santiago, deduplicación de correos, rachas de siete días, snapshots históricos, enlaces de un solo uso y autenticación del cron. Las pruebas usan un SQLite temporal aislado y no tocan `instance/checklist.db`.
+Ejecuta `python -m pytest -q` para validar permisos, persistencia, cierres de Santiago, deduplicación de correos, rachas de siete días, snapshots históricos, enlaces de un solo uso, autenticación del cron y envíos ZeptoMail simulados. Las pruebas no contactan el proveedor y usan un SQLite temporal aislado; no tocan `instance/checklist.db`.
 
 ## Migraciones
 
