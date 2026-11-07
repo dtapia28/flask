@@ -1,6 +1,8 @@
 import re
+import json
 from datetime import date, time, datetime
 from zoneinfo import ZoneInfo
+from urllib.error import URLError
 import pytest
 import main
 
@@ -97,12 +99,13 @@ def test_another_user_cannot_toggle_record(client):
  c.post('/login',data={'email':'other@example.test','password':'long-password-123'})
  assert c.post(f'/record/{rid}/task/{sid}').status_code==404
 
-def test_password_setup_token_is_one_time_and_not_stored_verbatim(client):
+def test_password_setup_token_is_one_time_and_not_stored_verbatim(client,caplog):
  c,ids=client; login(c,'admin@example.test')
  response=c.post('/admin/user',data={'name':'New Member','email':'new@example.test'},follow_redirects=True)
  match=re.search(rb'/password/([A-Za-z0-9_-]+)',response.data)
  assert match
  raw=match.group(1).decode()
+ assert f'/password/{raw}' not in caplog.text
  with main.app.app_context():
   token=main.Token.query.order_by(main.Token.id.desc()).first()
   assert token.digest != raw
@@ -350,3 +353,104 @@ def test_pytest_fixture_uses_isolated_sqlite_file(client):
   project_database=(Path(main.app.root_path)/'instance'/'checklist.db').resolve()
   assert database != project_database
   assert database.name == 'pytest.sqlite'
+
+
+def test_zeptomail_api_success_uses_https_timeout_and_redacts_message(client,monkeypatch,caplog):
+ c,ids=client
+ monkeypatch.setenv('MAIL_MODE','zeptomail')
+ monkeypatch.setenv('MAIL_FROM','verified@example.test')
+ monkeypatch.setenv('ZEPTOMAIL_API_KEY','test-send-key')
+ calls=[]
+ class Response:
+  status=201
+  def __enter__(self): return self
+  def __exit__(self,*args): return False
+ def fake_urlopen(req,timeout):
+  calls.append((req,timeout))
+  return Response()
+ monkeypatch.setattr(main,'urlopen',fake_urlopen)
+ secret_link='https://example.test/checklist/password/private-token'
+ with main.app.app_context():
+  assert main.send_mail('recipient@example.test','Invitación',f'Usa {secret_link}','invite:test','invite')
+  row=main.MailLog.query.filter_by(key='invite:test').one()
+  assert row.status=='sent'
+  assert secret_link not in row.body and '[enlace temporal oculto]' in row.body
+ assert len(calls)==1 and calls[0][1]==5
+ req=calls[0][0]
+ assert req.full_url=='https://cpaas.zoho.com/v1.1/email'
+ assert req.get_header('Authorization')=='Zoho-enczapikey test-send-key'
+ payload=json.loads(req.data)
+ assert payload['from']['address']=='verified@example.test'
+ assert payload['to'][0]['email_address']['address']=='recipient@example.test'
+ assert secret_link in payload['textbody']
+ assert 'test-send-key' not in caplog.text and secret_link not in caplog.text
+
+
+def test_zeptomail_api_failure_is_recoverable_and_resend_does_not_duplicate_user(client,monkeypatch,caplog):
+ c,ids=client; login(c,'admin@example.test')
+ monkeypatch.setenv('MAIL_MODE','zeptomail')
+ monkeypatch.setenv('MAIL_FROM','verified@example.test')
+ monkeypatch.setenv('ZEPTOMAIL_API_KEY','test-send-key')
+ calls=[]
+ class Response:
+  status=201
+  def __enter__(self): return self
+  def __exit__(self,*args): return False
+ def fake_urlopen(req,timeout):
+  calls.append(req)
+  if len(calls)==1: raise URLError('simulated timeout')
+  return Response()
+ monkeypatch.setattr(main,'urlopen',fake_urlopen)
+ invitation={'name':'Invitado','email':'invited@example.test'}
+ failed=c.post('/admin/user',data=invitation,follow_redirects=True)
+ assert b'La cuenta qued' in failed.data and b'Reenviar invitaci' in failed.data
+ assert b'/password/' not in failed.data
+ with main.app.app_context():
+  invited=main.User.query.filter_by(email='invited@example.test').one()
+  user_id=invited.id
+  assert main.User.query.filter_by(email='invited@example.test').count()==1
+  mail=main.MailLog.query.filter_by(key=f'invite:{user_id}').one()
+  assert mail.status=='failed' and mail.attempts==1
+  old_token=main.Token.query.filter_by(user_id=user_id,purpose='setup',used=False).one()
+  old_digest=old_token.digest
+  assert '/password/' not in mail.body and 'private-token' not in mail.body
+ resent=c.post(f'/admin/user/{user_id}/resend-invite',follow_redirects=True)
+ assert b'Invitaci' in resent.data and b'enviada' in resent.data
+ with main.app.app_context():
+  assert main.User.query.filter_by(email='invited@example.test').count()==1
+  mail=main.MailLog.query.filter_by(key=f'invite:{user_id}').one()
+  assert mail.status=='sent' and mail.attempts==2
+  assert main.Token.query.filter_by(user_id=user_id,purpose='setup',used=False).count()==1
+  assert main.db.session.query(main.Token.id).filter_by(user_id=user_id,purpose='setup',used=True).count()==1
+  assert main.db.session.query(main.Token.id).filter_by(user_id=user_id,digest=old_digest,used=True).count()==1
+ assert len(calls)==2
+ assert 'test-send-key' not in caplog.text and '/password/' not in caplog.text
+
+
+def test_stale_pending_invitation_can_be_retried_without_duplicate_user(client,monkeypatch):
+ c,ids=client; login(c,'admin@example.test')
+ monkeypatch.setenv('MAIL_MODE','zeptomail')
+ monkeypatch.setenv('MAIL_FROM','verified@example.test')
+ monkeypatch.setenv('ZEPTOMAIL_API_KEY','test-send-key')
+ class Response:
+  status=201
+  def __enter__(self): return self
+  def __exit__(self,*args): return False
+ calls=[]
+ def fake_urlopen(req,timeout): calls.append(req); return Response()
+ monkeypatch.setattr(main,'urlopen',fake_urlopen)
+ with main.app.app_context():
+  user=main.db.session.get(main.User,ids[1])
+  main.db.session.add(main.MailLog(key=f'invite:{user.id}',recipient=user.email,kind='invite',body='[enlace temporal oculto]',status='pending',attempts=1,sent_at=main.now()-main.timedelta(minutes=3)))
+  main.db.session.add(main.Token(user_id=user.id,digest='old-setup-digest',purpose='setup',expires=main.now()+main.timedelta(hours=1)))
+  main.db.session.commit(); user_id=user.id
+ page=c.get('/admin')
+ assert b'Reenviar invitaci' in page.data and b'pendiente' in page.data
+ response=c.post(f'/admin/user/{user_id}/resend-invite',follow_redirects=True)
+ assert response.status_code==200
+ with main.app.app_context():
+  assert main.User.query.filter_by(email='user@example.test').count()==1
+  mail=main.MailLog.query.filter_by(key=f'invite:{user_id}').one()
+  assert mail.status=='sent' and mail.attempts==2
+  assert main.Token.query.filter_by(user_id=user_id,purpose='setup',used=False).count()==1
+ assert len(calls)==1
