@@ -13,14 +13,14 @@ Aplicación Flask en español para listas asignadas, cumplimiento diario e histo
 
 ## Datos de prueba locales
 
-Para cargar cuentas demo y una lista asignada sin contraseñas fijas, ejecuta las migraciones y luego activa el comando solo para esa llamada:
+Para cargar cuentas demo, dos listas, asignaciones y 25 ejecuciones (para revisar la paginación) sin contraseñas fijas, ejecuta las migraciones y luego activa el comando solo para esa llamada:
 
 ```bash
 flask --app main db upgrade
 ALLOW_DEMO_SEED=true APP_URL=http://localhost:5001 flask --app main seed-demo
 ```
 
-El comando solo acepta SQLite local, se niega en Railway/producción, es idempotente y muestra enlaces de establecimiento de contraseña de un solo uso, válidos por dos horas. Puedes cambiar `DEMO_ADMIN_EMAIL` y `DEMO_USER_EMAIL` en `.env`. No se ejecuta al arrancar la app ni borra datos.
+El comando solo acepta SQLite local, se niega en Railway/producción, es idempotente y muestra enlaces de establecimiento de contraseña de un solo uso, válidos por dos horas. Crea un administrador, un usuario activo y una cuenta con invitación pendiente. Puedes cambiar `DEMO_ADMIN_EMAIL`, `DEMO_USER_EMAIL` y `DEMO_PENDING_EMAIL`. No se ejecuta al arrancar la app ni borra datos. Para no tocar otra base local, usa `DATABASE_URL=sqlite:///revision-demo-final.sqlite` en los comandos de migración, seed y arranque.
 
 ## Administrador inicial
 
@@ -63,4 +63,4 @@ Se usa Flask-Migrate/Alembic. Para nueva versión: `flask --app main db migrate 
 
 ## Alcance actual y notas
 
-Las tareas se congelan en el primer registro diario creado, preservando días cerrados cuando cambien tareas. Usuarios pueden ver y completar sus asignaciones, el servidor aplica el aislamiento y bloquea cambios después del cierre. Administradores gestionan usuarios (activar/desactivar), listas nuevas con tantas secciones de elementos como necesites, asignaciones, pausas y correcciones con motivo; pueden consultar historial de cumplimiento/correos. En esta primera versión las listas son inmutables desde interfaz tras crearse para proteger historial; para cambiar contenido, crea una lista revisada y asígnala. El filtro de cumplimiento permite seleccionar usuario, lista y rango de fechas. Si activas el aviso semanal en una asignación ya creada, su conteo comienza ese día.
+Las tareas se congelan en el primer registro diario creado, preservando días anteriores cuando cambien las listas. Administración se divide en Usuarios, Listas (con la vista interna Asignaciones) y Revisión. Las listas con asignaciones se archivan y sus asignaciones vigentes se pausan, mientras el historial permanece consultable. La eliminación de usuarios con referencias aplica una baja lógica y conserva las ejecuciones. Revisión muestra 20 registros por página, filtra por usuario, lista, fechas y estado, y ofrece detalle con corrección auditada. El historial personal también pagina de 20 en 20 y limita cada consulta a la cuenta autenticada.
