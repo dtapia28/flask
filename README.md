@@ -41,7 +41,7 @@ Cierres/envíos se procesan mediante `POST /admin/cron` con `Authorization: Bear
 
 ## Pruebas
 
-Ejecuta `python -m pytest -q` para validar permisos, persistencia, cierres de Santiago, deduplicación de correos, rachas de siete días, snapshots históricos, enlaces de un solo uso y autenticación del cron.
+Ejecuta `python -m pytest -q` para validar permisos, persistencia, cierres de Santiago, deduplicación de correos, rachas de siete días, snapshots históricos, enlaces de un solo uso y autenticación del cron. Las pruebas usan un SQLite temporal aislado y no tocan `instance/checklist.db`.
 
 ## Migraciones
 

@@ -6,7 +6,7 @@ import main
 
 @pytest.fixture
 def client(monkeypatch):
- main.app.config.update(TESTING=True,SQLALCHEMY_DATABASE_URI='sqlite://',WTF_CSRF_ENABLED=False,SECRET_KEY='test')
+ main.app.config.update(TESTING=True,WTF_CSRF_ENABLED=False,SECRET_KEY='test')
  with main.app.app_context():
   main.db.drop_all(); main.db.create_all()
   admin=main.User(name='Admin',email='admin@example.test',password=main.generate_password_hash('long-password-123'),role='admin')
@@ -226,6 +226,15 @@ with main.app.app_context():
  connection.close()
  run_against(stamped_latest_db)
 
+ # Reproduce the post-test failure state where only Alembic's latest marker remains.
+ stamped_test_wipe_db = tmp_path / 'stamped-after-test-wipe.sqlite'
+ connection = sqlite3.connect(stamped_test_wipe_db)
+ connection.execute('CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL PRIMARY KEY)')
+ connection.execute("INSERT INTO alembic_version (version_num) VALUES ('e1b9365a70c4')")
+ connection.commit()
+ connection.close()
+ run_against(stamped_test_wipe_db)
+
 
 def test_admin_can_create_many_sections_and_snapshot_preserves_them(client):
  c,ids=client; login(c,'admin@example.test')
@@ -332,3 +341,12 @@ def test_seed_demo_is_opt_in_and_idempotent(client,monkeypatch):
   assert main.Assignment.query.filter_by(user_id=demo_user.id,checklist_id=checklist.id).count()==1
   for person in (demo_admin,demo_user):
    assert main.Token.query.filter_by(user_id=person.id,purpose='setup',used=False).count()==1
+
+
+def test_pytest_fixture_uses_isolated_sqlite_file(client):
+ from pathlib import Path
+ with main.app.app_context():
+  database=Path(main.db.engine.url.database).resolve()
+  project_database=(Path(main.app.root_path)/'instance'/'checklist.db').resolve()
+  assert database != project_database
+  assert database.name == 'pytest.sqlite'
