@@ -34,22 +34,22 @@ Cierres/envíos se procesan con `flask --app main process-closures`, que cierra 
 
 ## Railway
 
-El repositorio queda configurado para Railway. El archivo `railway.json` migra antes del arranque, usa Gunicorn escuchando en el puerto asignado por Railway y declara `/health` para la comprobación de salud.
+El servicio web usa Gunicorn y el puerto que asigna Railway. Configura la migración y el health check en los ajustes del servicio al crearlo.
 
 ### Publicar la primera versión
 
-1. Sube la rama `desarrollo` a GitHub y en Railway crea un proyecto desde el repositorio `dtapia28/flask`, seleccionando esa rama. Configura el servicio web para desplegar desde la raíz del repositorio.
+1. En Railway crea un proyecto desde el repositorio `dtapia28/flask`, seleccionando la rama `desarrollo`. Configura el servicio web para desplegar desde la raíz del repositorio. Railway detecta Python y crea el build automáticamente.
 2. En el proyecto Railway agrega PostgreSQL. En el servicio web crea `DATABASE_URL` como referencia a la variable `DATABASE_URL` del servicio PostgreSQL; así no se copia ni expone la contraseña de la base.
 3. En Variables del servicio web configura `APP_ENV=production`, `SECRET_KEY` y `CRON_SECRET` con valores aleatorios distintos de al menos 32 caracteres, `APP_URL=https://tapiaaraya.com/checklist`, `COOKIE_SECURE=true`, `MAIL_MODE=smtp`, `MAIL_FROM`, `SMTP_HOST`, `SMTP_PORT=587`, `SMTP_USER`, `SMTP_PASSWORD` y `ADMIN_EMAIL`. No uses los valores de ejemplo del `.env`.
 4. Añade el dominio que usarán las personas en Settings → Networking y habilita HTTPS. La aplicación admite tanto abrir la raíz del dominio como usar el prefijo `/checklist`; ajusta `APP_URL` a la dirección pública real que usarás. La navegación y los formularios conservan ese prefijo.
-5. Haz el primer deploy. Railway ejecutará `flask --app main db upgrade` antes de iniciar Gunicorn. Revisa los logs: un fallo de migración detiene el release. Cuando el deploy esté activo, abre `/health` y confirma que responde `ok`.
+5. En Settings del servicio web define **Pre-deploy command** como `flask --app main db upgrade`, **Start command** como `gunicorn --bind 0.0.0.0:$PORT main:app` y **Healthcheck path** como `/health`. Haz el primer deploy. Revisa los logs: un fallo de migración debe detener el release. Cuando el deploy esté activo, abre `/health` y confirma que responde `ok`.
 6. En la base ya migrada crea el administrador una sola vez desde Railway → servicio web → Shell con `flask --app main create-admin`. Completa nombre, correo y contraseña en la consola. No uses `seed-demo` en producción.
-7. Crea un servicio Cron en Railway desde el mismo repositorio y rama, con el comando de inicio `flask --app main process-closures` y horario `*/5 * * * *`. Asigna a ese servicio la misma referencia `DATABASE_URL` y las mismas variables `APP_ENV`, `SECRET_KEY`, `APP_URL`, `CRON_SECRET`, `ADMIN_EMAIL`, `MAIL_MODE` y SMTP. Debe usar la base PostgreSQL del sitio.
+7. Crea un segundo servicio desde el mismo repositorio y rama. En Settings pon el **Start command** `flask --app main process-closures` y el **Cron schedule** `*/5 * * * *`. Asigna a ese servicio la misma referencia `DATABASE_URL` y las mismas variables `APP_ENV`, `SECRET_KEY`, `APP_URL`, `CRON_SECRET`, `ADMIN_EMAIL`, `MAIL_MODE` y SMTP. Debe usar la base PostgreSQL del sitio y terminar después de cada ejecución.
 8. Entra con el administrador, crea los usuarios familiares, asigna listas y prueba desde un teléfono la invitación, inicio de sesión, marcado de tareas e historial.
 
 Los servicios Cron de Railway usan horario UTC; el código interpreta los cierres según `America/Santiago`. No es necesario mantener un worker encendido: el cron ejecuta el comando y termina. Revisa el costo vigente de Railway y del proveedor SMTP antes de habilitar el proyecto.
 
-No se publica ni se modifica Railway desde este cambio; solo queda preparado el código y la configuración versionada.
+Railway está retirando su configuración `railway.json` para servicios nuevos, así que estos pasos usan los ajustes del panel. No se ha creado ni desplegado ningún servicio desde este cambio.
 
 ## Pruebas
 

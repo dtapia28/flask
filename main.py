@@ -1,4 +1,4 @@
-import os, secrets, hashlib, json
+import os, secrets, hashlib, json, re
 import click
 from datetime import datetime, date, time, timedelta
 from zoneinfo import ZoneInfo
@@ -84,13 +84,17 @@ def admin_required(fn):
   return fn(*a,**kw)
  return wrapped
 def now(): return datetime.now(TZ)
+def public_url(path):
+ base=os.environ.get('APP_URL') or request.url_root.rstrip('/')
+ return base.rstrip('/')+'/'+path.lstrip('/')
 def send_mail(recipient,subject,body,key,kind='user'):
  existing=MailLog.query.filter_by(key=key).first()
  if existing and existing.status!='failed': return False
  if existing:
   existing.status='pending'; existing.attempts+=1; existing.error=None; db.session.commit(); row=existing
  else:
-  row=MailLog(key=key,recipient=recipient,kind=kind,body=body,status='pending',attempts=1); db.session.add(row)
+  safe_body=re.sub(r'https?://[^\s]*/password/[^\s]+', '[enlace temporal oculto]', body)
+  row=MailLog(key=key,recipient=recipient,kind=kind,body=safe_body,status='pending',attempts=1); db.session.add(row)
   try: db.session.commit()
   except Exception:
    db.session.rollback()
@@ -210,7 +214,7 @@ def add_user():
  email=request.form['email'].strip().lower()
  if User.query.filter_by(email=email).first(): flash('Ese correo ya existe.')
  else:
-  u=User(email=email,name=request.form['name'].strip(),password=generate_password_hash(secrets.token_urlsafe(32))); db.session.add(u); db.session.commit(); raw=create_token(u,'setup'); link=url_for('set_password',raw=raw,_external=True); body=f"Hola {u.name}. El administrador te invitó a Checklist familiar. Establece tu contraseña en este enlace de un solo uso, válido por 2 horas: {link}"
+  u=User(email=email,name=request.form['name'].strip(),password=generate_password_hash(secrets.token_urlsafe(32))); db.session.add(u); db.session.commit(); raw=create_token(u,'setup'); link=public_url(f'password/{raw}'); body=f"Hola {u.name}. El administrador te invitó a Checklist familiar. Establece tu contraseña en este enlace de un solo uso, válido por 2 horas: {link}"
   try: send_mail(u.email,'Invitación a Checklist familiar',body,f'invite:{u.id}','invite')
   except Exception: app.logger.exception('Error enviando invitación')
   flash(f"Invitación creada. Enlace (válido 2 horas): {link}")
@@ -296,7 +300,7 @@ def forgot():
  if request.method=='POST':
   u=User.query.filter_by(email=request.form.get('email','').lower().strip(),active=True).first()
   if u:
-   raw=secrets.token_urlsafe(32); t=Token(user_id=u.id,digest=hashlib.sha256(raw.encode()).hexdigest(),purpose='reset',expires=now()+timedelta(hours=2)); db.session.add(t); db.session.commit(); link=url_for('set_password',raw=raw,_external=True)
+   raw=secrets.token_urlsafe(32); t=Token(user_id=u.id,digest=hashlib.sha256(raw.encode()).hexdigest(),purpose='reset',expires=now()+timedelta(hours=2)); db.session.add(t); db.session.commit(); link=public_url(f'password/{raw}')
    try: send_mail(u.email,'Restablecer contraseña',f'Enlace válido por 2 horas y un solo uso: {link}',f'token:{t.id}','reset')
    except Exception: app.logger.exception('Error enviando enlace')
   flash('Si el correo existe, recibirás instrucciones.')
