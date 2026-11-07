@@ -1,5 +1,7 @@
 import os, secrets, hashlib, json, re
 import click
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
 from datetime import datetime, date, time, timedelta
 from zoneinfo import ZoneInfo
 from functools import wraps
@@ -23,19 +25,26 @@ def normalize_database_url(url):
 
 production = os.environ.get('APP_ENV','').lower()=='production' or bool(os.environ.get('RAILWAY_ENVIRONMENT'))
 database_url = os.environ.get('DATABASE_URL','sqlite:///checklist.db')
+mail_mode = os.environ.get('MAIL_MODE','console').lower()
 if production:
- required = ['SECRET_KEY','DATABASE_URL','APP_URL','CRON_SECRET','ADMIN_EMAIL','MAIL_FROM','SMTP_HOST','SMTP_USER','SMTP_PASSWORD']
+ required = ['SECRET_KEY','DATABASE_URL','APP_URL','CRON_SECRET','ADMIN_EMAIL','MAIL_FROM']
+ if mail_mode=='zeptomail':
+  required.append('ZEPTOMAIL_API_KEY')
+ elif mail_mode=='smtp':
+  required.extend(['SMTP_HOST','SMTP_USER','SMTP_PASSWORD'])
  missing = [key for key in required if not os.environ.get(key)]
  if missing:
   raise RuntimeError('Faltan variables requeridas para producción: '+', '.join(missing))
+ if mail_mode not in ('zeptomail','smtp'):
+  raise RuntimeError('En producción configura MAIL_MODE=zeptomail o MAIL_MODE=smtp.')
  if len(os.environ['SECRET_KEY']) < 32 or len(os.environ['CRON_SECRET']) < 32:
   raise RuntimeError('SECRET_KEY y CRON_SECRET deben tener al menos 32 caracteres.')
  if not database_url.startswith(('postgres://','postgresql://','postgresql+psycopg://')):
   raise RuntimeError('En producción DATABASE_URL debe apuntar a PostgreSQL.')
  if not os.environ['APP_URL'].startswith('https://'):
   raise RuntimeError('APP_URL debe comenzar con https:// en producción.')
- if os.environ.get('MAIL_MODE','').lower()!='smtp':
-  raise RuntimeError('En producción configura MAIL_MODE=smtp.')
+ if mail_mode=='zeptomail' and not os.environ.get('ZEPTOMAIL_API_URL','https://cpaas.zoho.com/v1.1/email').startswith('https://'):
+  raise RuntimeError('ZEPTOMAIL_API_URL debe usar HTTPS.')
  if os.environ.get('COOKIE_SECURE','').lower()!='true':
   raise RuntimeError('En producción configura COOKIE_SECURE=true.')
 app = Flask(__name__)
@@ -74,6 +83,9 @@ class MailLog(db.Model):
 class Token(db.Model):
  id=db.Column(db.Integer,primary_key=True); user_id=db.Column(db.ForeignKey('user.id'),nullable=False); digest=db.Column(db.String(64),unique=True); purpose=db.Column(db.String(20)); expires=db.Column(db.DateTime,nullable=False); used=db.Column(db.Boolean,default=False)
 
+class MailDeliveryError(Exception): pass
+PENDING_MAIL_RETRY_AFTER=timedelta(minutes=2)
+
 @login.user_loader
 def load_user(uid): return db.session.get(User,int(uid))
 def admin_required(fn):
@@ -87,13 +99,31 @@ def now(): return datetime.now(TZ)
 def public_url(path):
  base=os.environ.get('APP_URL') or request.url_root.rstrip('/')
  return base.rstrip('/')+'/'+path.lstrip('/')
-def send_mail(recipient,subject,body,key,kind='user'):
+def redacted_mail_body(body):
+ return re.sub(r'https?://[^\s]*/password/[^\s]+', '[enlace temporal oculto]', body)
+def send_zeptomail(recipient,subject,body):
+ payload={'from':{'address':os.environ['MAIL_FROM']},'to':[{'email_address':{'address':recipient}}],'subject':subject,'textbody':body}
+ data=json.dumps(payload).encode('utf-8')
+ req=Request(os.environ.get('ZEPTOMAIL_API_URL','https://cpaas.zoho.com/v1.1/email'),data=data,headers={'Authorization':'Zoho-enczapikey '+os.environ['ZEPTOMAIL_API_KEY'],'Accept':'application/json','Content-Type':'application/json'},method='POST')
+ try:
+  with urlopen(req,timeout=5) as response:
+   status=getattr(response,'status',None) or response.getcode()
+   if not 200<=status<300: raise MailDeliveryError('El proveedor de correo rechazó el mensaje.')
+ except HTTPError as exc:
+  raise MailDeliveryError(f'El proveedor de correo respondió HTTP {exc.code}.') from None
+ except (URLError,TimeoutError,OSError) as exc:
+  raise MailDeliveryError('No se pudo conectar con el proveedor de correo.') from None
+def send_mail(recipient,subject,body,key,kind='user',claimed=False):
  existing=MailLog.query.filter_by(key=key).first()
- if existing and existing.status!='failed': return False
+ if existing and claimed:
+  if existing.status!='pending': return False
+ elif existing and existing.status!='failed': return False
+ safe_body=redacted_mail_body(body)
  if existing:
-  existing.status='pending'; existing.attempts+=1; existing.error=None; db.session.commit(); row=existing
+  if not claimed:
+   existing.status='pending'; existing.sent_at=now(); existing.attempts+=1; existing.error=None
+  existing.recipient=recipient; existing.kind=kind; existing.body=safe_body; db.session.commit(); row=existing
  else:
-  safe_body=re.sub(r'https?://[^\s]*/password/[^\s]+', '[enlace temporal oculto]', body)
   row=MailLog(key=key,recipient=recipient,kind=kind,body=safe_body,status='pending',attempts=1); db.session.add(row)
   try: db.session.commit()
   except Exception:
@@ -101,17 +131,24 @@ def send_mail(recipient,subject,body,key,kind='user'):
    # A concurrent cron run claimed this notification first.
    if MailLog.query.filter_by(key=key).first(): return False
    raise
- mode=os.environ.get('MAIL_MODE','console')
+ mode=os.environ.get('MAIL_MODE','console').lower()
  try:
   if mode=='smtp':
    import smtplib
    from email.message import EmailMessage
    msg=EmailMessage(); msg['Subject']=subject; msg['From']=os.environ['MAIL_FROM']; msg['To']=recipient; msg.set_content(body)
-   with smtplib.SMTP(os.environ['SMTP_HOST'],int(os.environ.get('SMTP_PORT','587'))) as s:
+   with smtplib.SMTP(os.environ['SMTP_HOST'],int(os.environ.get('SMTP_PORT','587')),timeout=5) as s:
     s.starttls(); s.login(os.environ['SMTP_USER'],os.environ['SMTP_PASSWORD']); s.send_message(msg)
-  else: app.logger.info('MAIL to=%s subject=%s body=%s',recipient,subject,body)
- except Exception:
-  row.status='failed'; row.error='provider_error'; db.session.commit(); raise
+  elif mode=='zeptomail':
+   send_zeptomail(recipient,subject,body)
+  elif mode=='console':
+   app.logger.info('MAIL mode=console kind=%s subject=%s body=%s',kind,subject,safe_body)
+  else:
+   raise MailDeliveryError('MAIL_MODE no está soportado.')
+ except Exception as exc:
+  row.status='failed'; row.error='provider_error'; db.session.commit()
+  if isinstance(exc,MailDeliveryError): raise
+  raise MailDeliveryError('No se pudo entregar el correo.') from None
  row.status='sent'; row.sent_at=now(); db.session.commit(); return True
 def dayrecord(assignment,day):
  rec=DailyRecord.query.filter_by(assignment_id=assignment.id,day=day).first()
@@ -207,17 +244,71 @@ def admin():
  if request.args.get('checklist_id'): query=query.filter(Assignment.checklist_id==request.args.get('checklist_id',type=int))
  if request.args.get('from'): query=query.filter(DailyRecord.day>=date.fromisoformat(request.args['from']))
  if request.args.get('to'): query=query.filter(DailyRecord.day<=date.fromisoformat(request.args['to']))
- return render_template('admin.html',users=User.query.order_by(User.id).all(),lists=Checklist.query.order_by(Checklist.id).all(),assignments=Assignment.query.all(),records=query.order_by(DailyRecord.day.desc()).limit(500).all(),mails=MailLog.query.order_by(MailLog.sent_at.desc()).limit(100).all())
+ invite_statuses={int(m.key.split(':',1)[1]):m.status for m in MailLog.query.filter_by(kind='invite').all() if m.key and m.key.startswith('invite:') and m.key.split(':',1)[1].isdigit()}
+ return render_template('admin.html',users=User.query.order_by(User.id).all(),lists=Checklist.query.order_by(Checklist.id).all(),assignments=Assignment.query.all(),records=query.order_by(DailyRecord.day.desc()).limit(500).all(),mails=MailLog.query.order_by(MailLog.sent_at.desc()).limit(100).all(),invite_statuses=invite_statuses)
+def claim_invitation_retry(user):
+ mail=MailLog.query.filter_by(key=f'invite:{user.id}').first()
+ if not mail: return False
+ if mail.status=='failed':
+  claim=MailLog.query.filter_by(id=mail.id,status='failed')
+ elif mail.status=='pending':
+  pending_at=mail.sent_at
+  if pending_at and pending_at.tzinfo is None: pending_at=pending_at.replace(tzinfo=TZ)
+  if not pending_at or pending_at>now()-PENDING_MAIL_RETRY_AFTER: return False
+  claim=MailLog.query.filter_by(id=mail.id,status='pending').filter(MailLog.sent_at==mail.sent_at)
+ else:
+  return False
+ claimed_at=now()
+ updated=claim.update({'status':'pending','sent_at':claimed_at,'attempts':MailLog.attempts+1,'error':None},synchronize_session=False)
+ db.session.commit(); db.session.expire_all()
+ return updated==1
+def deliver_invitation(user,claimed=False):
+ for old in Token.query.filter_by(user_id=user.id,purpose='setup',used=False).all(): old.used=True
+ raw=secrets.token_urlsafe(32)
+ db.session.add(Token(user_id=user.id,digest=hashlib.sha256(raw.encode()).hexdigest(),purpose='setup',expires=now()+timedelta(hours=2)))
+ db.session.commit()
+ link=public_url(f'password/{raw}')
+ body=f"Hola {user.name}. El administrador te invitó a Checklist familiar. Establece tu contraseña en este enlace de un solo uso, válido por 2 horas: {link}"
+ try:
+  sent=send_mail(user.email,'Invitación a Checklist familiar',body,f'invite:{user.id}','invite',claimed=claimed)
+ except MailDeliveryError:
+  app.logger.warning('Invitation delivery failed for user_id=%s',user.id)
+  flash(f'No se pudo enviar la invitación a {user.email}. La cuenta quedó guardada; puedes reenviarla desde la sección Usuarios.')
+  return False
+ if not sent:
+  flash('La invitación sigue pendiente de entrega. Espera dos minutos y vuelve a intentar el reenvío.')
+  return False
+ if os.environ.get('MAIL_MODE','console').lower()=='console':
+  flash(f'Invitación local creada (modo consola). Enlace válido 2 horas: {link}')
+ else:
+  flash(f'Invitación enviada a {user.email}.')
+ return True
 @app.post('/admin/user')
 @admin_required
 def add_user():
  email=request.form['email'].strip().lower()
- if User.query.filter_by(email=email).first(): flash('Ese correo ya existe.')
+ existing=User.query.filter_by(email=email).first()
+ if existing:
+  if existing.role=='user' and claim_invitation_retry(existing): deliver_invitation(existing,claimed=True)
+  elif MailLog.query.filter_by(key=f'invite:{existing.id}',status='pending').first(): flash('La invitación sigue en curso. Espera dos minutos y vuelve a intentar.')
+  else: flash('Ese correo ya existe.')
  else:
-  u=User(email=email,name=request.form['name'].strip(),password=generate_password_hash(secrets.token_urlsafe(32))); db.session.add(u); db.session.commit(); raw=create_token(u,'setup'); link=public_url(f'password/{raw}'); body=f"Hola {u.name}. El administrador te invitó a Checklist familiar. Establece tu contraseña en este enlace de un solo uso, válido por 2 horas: {link}"
-  try: send_mail(u.email,'Invitación a Checklist familiar',body,f'invite:{u.id}','invite')
-  except Exception: app.logger.exception('Error enviando invitación')
-  flash(f"Invitación creada. Enlace (válido 2 horas): {link}")
+  u=User(email=email,name=request.form['name'].strip(),password=generate_password_hash(secrets.token_urlsafe(32))); db.session.add(u); db.session.commit(); deliver_invitation(u)
+ return redirect(url_for('admin'))
+@app.post('/admin/user/<int:uid>/resend-invite')
+@admin_required
+def resend_invite(uid):
+ user=db.get_or_404(User,uid)
+ if user.role!='user': abort(404)
+ mail=MailLog.query.filter_by(key=f'invite:{user.id}').first()
+ if not mail or mail.status not in ('pending','failed'):
+  flash('No hay una invitación pendiente para reenviar. Si la persona ya activó su cuenta, debe usar Recuperar contraseña.')
+ elif claim_invitation_retry(user):
+  deliver_invitation(user,claimed=True)
+ elif mail.status=='pending':
+  flash('La invitación sigue en curso o acaba de intentarse. Espera dos minutos y vuelve a intentar.')
+ else:
+  flash('No se puede reenviar esta invitación. Revisa su estado en el historial de correo.')
  return redirect(url_for('admin'))
 def create_token(u,purpose):
  raw=secrets.token_urlsafe(32); db.session.add(Token(user_id=u.id,digest=hashlib.sha256(raw.encode()).hexdigest(),purpose=purpose,expires=now()+timedelta(hours=2))); db.session.commit(); return raw
