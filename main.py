@@ -276,7 +276,7 @@ def admin_lists():
 @admin_required
 def admin_assignments():
  edit_id=request.args.get('edit',type=int)
- return render_template('admin_assignments.html',assignments=Assignment.query.order_by(Assignment.ended_at.isnot(None),Assignment.start_date.desc()).all(),users=User.query.filter_by(active=True,deleted_at=None,role='user').all(),lists=Checklist.query.filter_by(active=True).all(),edit=db.session.get(Assignment,edit_id) if edit_id else None)
+ return render_template('admin_assignments.html',assignments=Assignment.query.order_by(Assignment.ended_at.isnot(None),Assignment.start_date.desc()).all(),users=User.query.filter_by(active=True,deleted_at=None).order_by(User.name).all(),lists=Checklist.query.filter_by(active=True).all(),edit=db.session.get(Assignment,edit_id) if edit_id else None)
 @app.get('/admin/review')
 @admin_required
 def admin_review():
