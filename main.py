@@ -482,7 +482,27 @@ def delete_list(cid):
 def assign():
  u=db.get_or_404(User,request.form.get('user_id',type=int)); c=db.get_or_404(Checklist,request.form.get('checklist_id',type=int))
  if u.deleted_at or not u.active or c.archived_at: abort(400)
- a=Assignment(user_id=u.id,checklist_id=c.id,start_date=date.fromisoformat(request.form['start_date']),weekdays=','.join(request.form.getlist('weekdays')),close_time=time.fromisoformat(request.form['close_time']),alert_admin='alert_admin' in request.form,alert_from=now().date()); db.session.add(a); db.session.commit(); return redirect(url_for('admin_assignments'))
+ a=Assignment(user_id=u.id,checklist_id=c.id,start_date=date.fromisoformat(request.form['start_date']),weekdays=','.join(request.form.getlist('weekdays')),close_time=time.fromisoformat(request.form['close_time']),alert_admin='alert_admin' in request.form,alert_from=now().date()); db.session.add(a); db.session.commit()
+ day_names=['lunes','martes','miércoles','jueves','viernes','sábado','domingo']
+ chosen_days=[day_names[int(value)] for value in a.weekdays.split(',') if value.isdigit() and 0<=int(value)<=6]
+ tasks=Task.query.filter_by(checklist_id=c.id,active=True).order_by(Task.position,Task.id).all()
+ task_lines=[]; section=''
+ for task in tasks:
+  if task.section!=section:
+   section=task.section; task_lines.append(f'\n{section}:')
+  task_lines.append(f'• {task.text}')
+ body=(f'Hola {u.name},\n\nTe asignaron la lista «{c.name}».\n'
+       f'Inicio: {a.start_date.strftime("%d-%m-%Y")}\n'
+       f'Días programados: {", ".join(chosen_days) if chosen_days else "ninguno"}\n'
+       f'Hora de cierre: {a.close_time.strftime("%H:%M")} (hora de Santiago)\n\n'
+       f'Tareas:{"".join(task_lines) if task_lines else "\nNo hay tareas activas."}\n\n'
+       f'Puedes revisar tu lista aquí: {public_url("today")}')
+ try:
+  send_mail(u.email,f'Nueva lista asignada: {c.name}',body,f'assignment:{a.id}:assigned','assignment')
+  flash('Asignación creada y correo informativo enviado.')
+ except MailDeliveryError:
+  flash('Asignación creada, pero no se pudo enviar el correo informativo. Revisa el historial de correo.')
+ return redirect(url_for('admin_assignments'))
 @app.post('/admin/assignment/<int:aid>/edit')
 @admin_required
 def edit_assignment(aid):
