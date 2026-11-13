@@ -85,7 +85,9 @@ class MailLog(db.Model):
 class Token(db.Model):
  id=db.Column(db.Integer,primary_key=True); user_id=db.Column(db.ForeignKey('user.id'),nullable=False); digest=db.Column(db.String(64),unique=True); purpose=db.Column(db.String(20)); expires=db.Column(db.DateTime,nullable=False); used=db.Column(db.Boolean,default=False)
 
-class MailDeliveryError(Exception): pass
+class MailDeliveryError(Exception):
+ def __init__(self,message,code='provider_error'):
+  super().__init__(message); self.code=code
 PENDING_MAIL_RETRY_AFTER=timedelta(minutes=2)
 
 @login.user_loader
@@ -112,9 +114,9 @@ def send_zeptomail(recipient,subject,body):
    status=getattr(response,'status',None) or response.getcode()
    if not 200<=status<300: raise MailDeliveryError('El proveedor de correo rechazó el mensaje.')
  except HTTPError as exc:
-  raise MailDeliveryError(f'El proveedor de correo respondió HTTP {exc.code}.') from None
+  raise MailDeliveryError(f'El proveedor de correo respondió HTTP {exc.code}.',f'http_{exc.code}') from None
  except (URLError,TimeoutError,OSError) as exc:
-  raise MailDeliveryError('No se pudo conectar con el proveedor de correo.') from None
+  raise MailDeliveryError('No se pudo conectar con el proveedor de correo.','connection_error') from None
 def send_mail(recipient,subject,body,key,kind='user',claimed=False):
  existing=MailLog.query.filter_by(key=key).first()
  if existing and claimed:
@@ -148,7 +150,7 @@ def send_mail(recipient,subject,body,key,kind='user',claimed=False):
   else:
    raise MailDeliveryError('MAIL_MODE no está soportado.')
  except Exception as exc:
-  row.status='failed'; row.error='provider_error'; db.session.commit()
+  row.status='failed'; row.error=exc.code if isinstance(exc,MailDeliveryError) else 'internal_error'; db.session.commit()
   if isinstance(exc,MailDeliveryError): raise
   raise MailDeliveryError('No se pudo entregar el correo.') from None
  row.status='sent'; row.sent_at=now(); db.session.commit(); return True
