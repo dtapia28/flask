@@ -1,38 +1,32 @@
 {% extends 'base.html' %}
 {% block content %}
-<h1>Hoy · {{day.strftime('%d-%m-%Y')}}</h1>
-<p>Zona horaria: America/Santiago</p>
-{% for a,r in items %}
-{% set total = r.snapshots|length %}
-{% set done = r.snapshots|selectattr('done')|list|length %}
-<article class="panel">
- <h2>{{a.checklist.name}}</h2>
- <p>{{a.checklist.description}}</p>
- <p>Estado: {% if r.status=='open' %}En curso{% elif r.status=='done' %}Cumplida y cerrada{% else %}Incumplida{% endif %}</p>
- <div class="completion-block">
-  <div class="completion-label"><strong>Progreso del día</strong><span>{{done}}/{{total}} tareas · {% if total %}{{(done * 100 / total)|round|int}}%{% else %}0%{% endif %}</span></div>
-  <progress class="completion-progress" value="{{done}}" max="{{total if total else 1}}" aria-label="Progreso del día" aria-valuetext="{{done}} de {{total}} tareas completadas"></progress>
- </div>
- {% if r.status=='done' and r.closed_at %}<p class="closed-time">Cerrada hoy a las {{r.closed_at.strftime('%H:%M')}}</p>{% endif %}
- {% set ns=namespace(section='') %}
- {% for s in r.snapshots %}
-  {% if ns.section != s.section %}
-   {% set section_tasks = r.snapshots|selectattr('section','equalto',s.section)|list %}
-   {% set section_done = section_tasks|selectattr('done')|list|length %}
-   <div class="section-progress-heading">
-    <h3 class="section-title">{{s.section}}</h3>
-    <span>{{section_done}}/{{section_tasks|length}}</span>
-   </div>
-   <progress class="completion-progress section-progress" value="{{section_done}}" max="{{section_tasks|length if section_tasks|length else 1}}" aria-label="Progreso de {{s.section}}" aria-valuetext="{{section_done}} de {{section_tasks|length}} tareas completadas"></progress>
-   {% set ns.section=s.section %}
-  {% endif %}
-  <form class="task" method="post" action="{{ url_for('toggle', rid=r.id, sid=s.id) }}"><input type="hidden" name="csrf_token" value="{{csrf_token()}}"><button class="check" {% if r.status!='open' %}disabled{% endif %}>{{'☑' if s.done else '☐'}} {{s.text}}</button></form>
- {% endfor %}
- <small>Cierre: {{a.close_time.strftime('%H:%M')}}</small>
-</article>
-{% else %}
-<section class="panel">No tienes listas programadas para hoy.</section>
-{% endfor %}
+<div class="checklist-page today-page">
+  <header class="checklist-heading">
+    <div><p class="checklist-eyebrow"><span class="eyebrow-dot"></span> TU ESPACIO FAMILIAR</p><h1>Hoy</h1><p class="heading-subtitle">Tus listas para el {{day.strftime('%d-%m-%Y')}} · <span>America/Santiago</span></p></div>
+    <div class="today-date"><i class="bi bi-calendar3"></i><span>Tu jornada</span></div>
+  </header>
+  {% for a,r in items %}
+  {% set done_count = r.snapshots|selectattr('done')|list|length %}
+  {% set total_count = r.snapshots|length %}
+  {% set progress = (done_count * 100 // total_count) if total_count else 0 %}
+  <article class="today-list-card">
+    <div class="today-card-top"><div class="list-identity"><span class="list-icon"><i class="bi bi-check2-square"></i></span><div><span class="checklist-eyebrow">LISTA DE HOY</span><h2>{{a.checklist.name}}</h2></div></div><span class="status-pill {% if r.status=='done' %}status-done{% elif r.status=='missed' %}status-missed{% else %}status-open{% endif %}"><span></span>{% if r.status=='open' %}En curso{% elif r.status=='done' %}Completada{% else %}No lograda{% endif %}</span></div>
+    {% if a.checklist.description %}<p class="today-description">{{a.checklist.description}}</p>{% endif %}
+    <div class="progress-summary"><span>{{done_count}} de {{total_count}} tareas completadas</span><strong>{{progress}}%</strong></div><div class="progress-track"><span style="width:{{progress}}%"></span></div>
+    <div class="today-sections">
+      {% set ns=namespace(section='') %}
+      {% for s in r.snapshots %}
+        {% if ns.section != s.section %}{% if ns.section %}</section>{% endif %}<section class="task-section"><h3><span class="section-marker"></span>{{s.section}}</h3>{% set ns.section=s.section %}{% endif %}
+        <form class="task" method="post" action="{{ url_for('toggle', rid=r.id, sid=s.id) }}"><input type="hidden" name="csrf_token" value="{{csrf_token()}}"><button class="check task-row {% if s.done %}is-done{% endif %}" {% if r.status!='open' %}disabled{% endif %}><span class="task-check-icon">{% if s.done %}<i class="bi bi-check-lg"></i>{% endif %}</span><span>{{s.text}}</span><span class="task-action">{% if r.status=='open' %}{% if s.done %}Hecho{% else %}Marcar{% endif %}{% endif %}</span></button></form>
+      {% endfor %}{% if ns.section %}</section>{% endif %}
+    </div>
+    <footer class="today-card-footer"><span><i class="bi bi-clock"></i> Cierre hoy a las <strong>{{a.close_time.strftime('%H:%M')}}</strong></span>{% if r.status=='done' and r.closed_at %}<span class="closed-time"><i class="bi bi-check-circle"></i> Cerrada a las {{r.closed_at.strftime('%H:%M')}}</span>{% endif %}</footer>
+  </article>
+  {% else %}
+  <section class="empty-today"><span class="empty-icon"><i class="bi bi-sun"></i></span><h2>Hoy tienes el día libre</h2><p>No hay listas programadas para hoy. Cuando te asignen una, aparecerá aquí.</p><a href="{{url_for('history')}}">Revisar mi historial <i class="bi bi-arrow-right"></i></a></section>
+  {% endfor %}
+</div>
 <script>
 (()=>{const key='checklist-scroll:'+location.pathname;document.querySelectorAll('form.task').forEach(form=>form.addEventListener('submit',()=>{try{sessionStorage.setItem(key,String(window.scrollY))}catch(_){}}));let saved;try{saved=sessionStorage.getItem(key);sessionStorage.removeItem(key)}catch(_){return}if(saved!==null){const y=Number(saved);window.addEventListener('pageshow',()=>requestAnimationFrame(()=>window.scrollTo(0,y)),{once:true})}})();
-</script>{% endblock %}
+</script>
+{% endblock %}
