@@ -1,0 +1,25 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="progress-page-heading"><div><p class="eyebrow">Tu avance</p><h1>Rachas y resumen semanal</h1><p>Semana del {{week_start.strftime('%d-%m-%Y')}} · America/Santiago</p></div><a class="button secondary" href="{{url_for('history')}}">Ver historial completo</a></div>
+<section class="progress-metrics">
+ <article class="progress-metric streak-metric"><span>Racha actual</span><strong>{{streak}}</strong><small>días planificados completados</small></article>
+ <article class="progress-metric"><span>Mejor racha</span><strong>{{best_streak}}</strong><small>días planificados</small></article>
+ <article class="progress-metric good-metric"><span>Completadas esta semana</span><strong>{{weekly.done}}</strong><small>de {{weekly.total}} ejecuciones</small></article>
+ <article class="progress-metric pending-metric"><span>Pendientes</span><strong>{{weekly.pending}}</strong><small>ejecuciones abiertas</small></article>
+ <article class="progress-metric bad-metric"><span>No logradas</span><strong>{{weekly.missed}}</strong><small>o incumplidas</small></article>
+</section>
+<section class="panel">
+ <div class="section-head"><div><h2>Tu semana</h2><p class="muted">Selecciona una ejecución para consultar sus tareas.</p></div><div class="progress-legend"><span><i class="legend-dot good"></i>Completada</span><span><i class="legend-dot pending"></i>Pendiente</span><span><i class="legend-dot bad"></i>No lograda</span></div></div>
+ <div class="week-calendar personal-calendar">
+ {% for cell in calendar %}
+  <article class="calendar-day {{cell.state}} {% if cell.future %}future{% endif %}">
+   <div class="calendar-date"><strong>{{weekday_names[cell.day.weekday()]}}</strong><span>{{cell.day.strftime('%d')}}</span></div>
+   {% if cell.future %}<span class="calendar-status">Próximo</span>
+   {% elif cell.records %}<span class="calendar-status">{{cell.label}}</span><small>{{cell.summary.done}}/{{cell.summary.total}} completadas</small>
+    <div class="calendar-record-links">{% for record in cell.records %}<a href="{{url_for('personal_record',rid=record.id)}}">{{record.assignment.checklist.name}} · {{record_status_label(record)}}</a>{% endfor %}</div>
+   {% else %}<span class="calendar-status">Sin ejecuciones</span>{% endif %}
+  </article>
+ {% endfor %}
+ </div>
+</section>
+{% endblock %}
