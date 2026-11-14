@@ -1,0 +1,38 @@
+{% extends 'admin_shell.html' %}
+{% set title='Progreso familiar' %}{% set active='review' %}
+{% block admin_content %}
+<div class="subnav"><a class="active" href="{{url_for('progress')}}">Resumen</a><a href="{{url_for('admin_review')}}">Cumplimiento</a><a href="{{url_for('admin_review',view='mail')}}">Historial de correo</a></div>
+<div class="progress-page-heading admin-progress-heading"><div><p class="eyebrow">Administración</p><h2>Resumen de cumplimiento</h2><p>Semana del {{week_start.strftime('%d-%m-%Y')}} · datos hasta {{today.strftime('%d-%m-%Y')}}</p></div><a class="button secondary" href="{{url_for('admin_review',**{'from':week_start.isoformat(),'to':today.isoformat()})}}">Abrir Revisión</a></div>
+<section class="progress-metrics admin-metrics">
+ <article class="progress-metric"><span>Ejecuciones</span><strong>{{weekly.total}}</strong><small>esta semana</small></article>
+ <article class="progress-metric good-metric"><span>Completadas</span><strong>{{weekly.done}}</strong><small>{{weekly.rate}}% del total</small></article>
+ <article class="progress-metric pending-metric"><span>Pendientes</span><strong>{{weekly.pending}}</strong><small>abiertas</small></article>
+ <article class="progress-metric bad-metric"><span>No logradas</span><strong>{{weekly.missed}}</strong><small>o incumplidas</small></article>
+</section>
+<section class="panel">
+ <div class="section-head"><div><h2>Actividad diaria</h2><p class="muted">Ejecuciones por estado. Cada barra lleva al detalle de Revisión.</p></div><div class="progress-legend"><span><i class="legend-dot good"></i>Completadas</span><span><i class="legend-dot pending"></i>Pendientes</span><span><i class="legend-dot bad"></i>No logradas</span></div></div>
+ <div class="admin-week-chart">
+ {% for cell in calendar %}
+  <a class="admin-chart-day {% if cell.future %}future{% endif %}" href="{{url_for('admin_review',**{'from':cell.day.isoformat(),'to':cell.day.isoformat()})}}" aria-label="{{cell.day.strftime('%d-%m-%Y')}}: {{cell.summary.done}} completadas, {{cell.summary.pending}} pendientes, {{cell.summary.missed}} no logradas">
+   <span class="chart-date">{{['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'][cell.day.weekday()]}}<br>{{cell.day.strftime('%d')}}</span>
+   <span class="stacked-bar" aria-hidden="true">{% if cell.summary.total %}<i class="bar-done" style="height:{{cell.summary.done*100/cell.summary.total}}%"></i><i class="bar-pending" style="height:{{cell.summary.pending*100/cell.summary.total}}%"></i><i class="bar-missed" style="height:{{cell.summary.missed*100/cell.summary.total}}%"></i>{% else %}<i class="bar-empty"></i>{% endif %}</span>
+   <span class="chart-total">{{cell.summary.total}} ejec.</span>
+  </a>
+ {% endfor %}
+ </div>
+</section>
+<section class="panel">
+ <div class="section-head"><div><h2>Por usuario</h2><p class="muted">Ordenado por pendientes y ejecuciones no logradas.</p></div></div>
+ <div class="table-wrap"><table><thead><tr><th>Usuario</th><th>Ejecuciones</th><th>Completadas</th><th>Pendientes</th><th>No logradas</th><th>Cumplimiento</th></tr></thead><tbody>
+ {% for row in user_rows %}<tr><td><a href="{{url_for('admin_review',user_id=row.user.id,**{'from':week_start.isoformat(),'to':today.isoformat()})}}">{{row.user.name}}</a></td><td>{{row.summary.total}}</td><td>{{row.summary.done}}</td><td>{{row.summary.pending}}</td><td>{{row.summary.missed}}</td><td><div class="rate-cell"><progress value="{{row.summary.rate}}" max="100" aria-label="Cumplimiento de {{row.user.name}}: {{row.summary.rate}} por ciento"></progress><span>{{row.summary.rate}}%</span></div></td></tr>
+ {% else %}<tr><td colspan="6">Aún no hay ejecuciones esta semana.</td></tr>{% endfor %}
+ </tbody></table></div>
+</section>
+<section class="panel">
+ <div class="section-head"><div><h2>Por lista</h2><p class="muted">Resultados de las ejecuciones de esta semana.</p></div></div>
+ <div class="table-wrap"><table><thead><tr><th>Lista</th><th>Ejecuciones</th><th>Completadas</th><th>Pendientes</th><th>No logradas</th><th>Cumplimiento</th></tr></thead><tbody>
+ {% for row in list_rows %}<tr><td><a href="{{url_for('admin_review',checklist_id=row.checklist.id,**{'from':week_start.isoformat(),'to':today.isoformat()})}}">{{row.checklist.name}}</a></td><td>{{row.summary.total}}</td><td>{{row.summary.done}}</td><td>{{row.summary.pending}}</td><td>{{row.summary.missed}}</td><td><div class="rate-cell"><progress value="{{row.summary.rate}}" max="100" aria-label="Cumplimiento de {{row.checklist.name}}: {{row.summary.rate}} por ciento"></progress><span>{{row.summary.rate}}%</span></div></td></tr>
+ {% else %}<tr><td colspan="6">Aún no hay ejecuciones esta semana.</td></tr>{% endfor %}
+ </tbody></table></div>
+</section>
+{% endblock %}

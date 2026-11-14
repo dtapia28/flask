@@ -48,6 +48,90 @@ def history():
  page=max(1,request.args.get('page',1,type=int)); q=DailyRecord.query.join(Assignment).filter(Assignment.user_id==current_user.id)
  pagination=q.order_by(DailyRecord.day.desc(),DailyRecord.id.desc()).paginate(page=page,per_page=20,error_out=False)
  return render_template('history.html',pagination=pagination,records=pagination.items)
+@login_required
+def progress():
+ today=now().date(); week_start=today-timedelta(days=today.weekday()); week_days=[week_start+timedelta(days=i) for i in range(7)]
+ query=DailyRecord.query.join(Assignment).join(User,Assignment.user_id==User.id).filter(User.deleted_at.is_(None),DailyRecord.day<=today)
+ if current_user.role!='admin': query=query.filter(Assignment.user_id==current_user.id)
+ else: query=query.filter(DailyRecord.day>=week_start)
+ records=query.order_by(DailyRecord.day.desc(),DailyRecord.id.desc()).all()
+ def category(record):
+  if record.status=='done': return 'done'
+  if record.status=='missed' or record_status_label(record)=='No lograda': return 'missed'
+  return 'pending'
+ def summary(rows):
+  done=sum(category(row)=='done' for row in rows); missed=sum(category(row)=='missed' for row in rows); total=len(rows)
+  return {'total':total,'done':done,'missed':missed,'pending':total-done-missed,'rate':round(done*100/total) if total else 0}
+ def day_state(rows):
+  stats=summary(rows)
+  if not rows: return ('Sin ejecuciones', 'empty')
+  if stats['missed']: return ('No lograda' if any(record_status_label(row)=='No lograda' for row in rows) else 'Incumplida','bad')
+  if stats['pending']: return ('Pendiente','pending')
+  return ('Completada','good')
+ from collections import defaultdict
+ by_day=defaultdict(list)
+ for row in records: by_day[row.day].append(row)
+ calendar=[]
+ for day in week_days:
+  rows=by_day.get(day,[]); label,state=day_state(rows)
+  calendar.append({'day':day,'records':rows,'summary':summary(rows),'label':label,'state':state,'future':day>today})
+ if current_user.role=='admin':
+  week_records=[row for row in records if week_start<=row.day<=today]; users_by_id={}; lists_by_id={}
+  for row in week_records:
+   u=row.assignment.user; c=row.assignment.checklist
+   users_by_id.setdefault(u.id,{'user':u,'records':[]})['records'].append(row)
+   lists_by_id.setdefault(c.id,{'checklist':c,'records':[]})['records'].append(row)
+  user_rows=[{'user':item['user'],'summary':summary(item['records'])} for item in users_by_id.values()]
+  list_rows=[{'checklist':item['checklist'],'summary':summary(item['records'])} for item in lists_by_id.values()]
+  user_rows.sort(key=lambda item:(-item['summary']['missed'],-item['summary']['pending'],-item['summary']['total'],item['user'].name.lower()))
+  list_rows.sort(key=lambda item:(-item['summary']['missed'],-item['summary']['pending'],-item['summary']['total'],item['checklist'].name.lower()))
+  return render_template('progress_admin.html',week_start=week_start,today=today,calendar=calendar,weekly=summary(week_records),user_rows=user_rows,list_rows=list_rows)
+ grouped=defaultdict(list)
+ for row in records: grouped[row.day].append(row)
+ assignments=Assignment.query.filter_by(user_id=current_user.id).all()
+ assignment_ids=[assignment.id for assignment in assignments]
+ changes_by_assignment=defaultdict(list)
+ for change in AssignmentSchedule.query.filter(AssignmentSchedule.assignment_id.in_(assignment_ids)).order_by(AssignmentSchedule.assignment_id,AssignmentSchedule.effective_from).all() if assignment_ids else []:
+  changes_by_assignment[change.assignment_id].append(change)
+ expected_days=set(); close_times_today={}
+ for assignment in assignments:
+  changes=changes_by_assignment[assignment.id]; change_index=0; weekdays={int(value) for value in assignment.weekdays.split(',') if value}; paused=assignment.paused; close_time=assignment.close_time
+  ended_at=assignment.ended_at
+  if ended_at and ended_at.tzinfo is None: ended_at=ended_at.replace(tzinfo=TZ)
+  last_day=min(today,ended_at.astimezone(TZ).date()) if ended_at else today
+  day=assignment.start_date
+  while day<=last_day:
+   while change_index<len(changes) and changes[change_index].effective_from<=day:
+    change=changes[change_index]; weekdays={int(value) for value in change.weekdays.split(',') if value}; paused=change.paused; close_time=change.close_time; change_index+=1
+   if not paused and day.weekday() in weekdays:
+    expected_days.add(day)
+    if day==today: close_times_today[assignment.id]=close_time
+   day+=timedelta(days=1)
+ streak=best_streak=run=0
+ for day in sorted(expected_days):
+  rows=grouped.get(day,[]); done=bool(rows) and summary(rows)['done']==len(rows)
+  if done: run+=1; best_streak=max(best_streak,run)
+  else: run=0
+ today_rows=grouped.get(today,[]); today_by_assignment={row.assignment_id:row for row in today_rows}
+ scheduled_today=[assignment for assignment in assignments if assignment.id in close_times_today]
+ pending_today=any(
+  (today_by_assignment.get(assignment.id) is None or today_by_assignment[assignment.id].status=='open')
+  and now()<datetime.combine(today,close_times_today[assignment.id],tzinfo=TZ)
+  for assignment in scheduled_today
+ )
+ count_from=today-timedelta(days=1) if pending_today else today
+ for day in sorted(expected_days,reverse=True):
+  if day>count_from: continue
+  rows=grouped.get(day,[])
+  if rows and summary(rows)['done']==len(rows): streak+=1
+  else: break
+ weekly_records=[row for row in records if week_start<=row.day<=today]
+ day_rows=[]
+ for day in week_days:
+  rows=by_day.get(day,[]); label,state=day_state(rows)
+  if day==today and not rows and pending_today: label,state='Pendiente','pending'
+  day_rows.append({'day':day,'records':rows,'summary':summary(rows),'label':label,'state':state,'future':day>today})
+ return render_template('progress_personal.html',week_start=week_start,today=today,calendar=day_rows,weekly=summary(weekly_records),streak=streak,best_streak=best_streak,weekday_names=['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'])
 @admin_required
 def admin():
  return admin_users()
@@ -371,6 +455,7 @@ def register_routes(app):
         ('/today', 'today', today, ['GET']),
         ('/record/<int:rid>/task/<int:sid>', 'toggle', toggle, ['POST']),
         ('/history', 'history', history, ['GET']),
+        ('/progress', 'progress', progress, ['GET']),
         ('/admin', 'admin', admin, ['GET']),
         ('/admin/users', 'admin_users', admin_users, ['GET']),
         ('/admin/lists', 'admin_lists', admin_lists, ['GET']),
