@@ -25,7 +25,7 @@ def redacted_mail_body(body):
 def send_zeptomail(recipient,subject,body):
  payload={'from':{'address':os.environ['MAIL_FROM']},'to':[{'email_address':{'address':recipient}}],'subject':subject,'textbody':body}
  data=json.dumps(payload).encode('utf-8')
- req=Request(os.environ.get('ZEPTOMAIL_API_URL','https://cpaas.zoho.com/v1.1/email'),data=data,headers={'Authorization':'Zoho-enczapikey '+os.environ['ZEPTOMAIL_API_KEY'],'Accept':'application/json','Content-Type':'application/json'},method='POST')
+ req=Request(os.environ.get('ZEPTOMAIL_API_URL','https://api.zeptomail.com/v1.1/email'),data=data,headers={'Authorization':'Zoho-enczapikey '+os.environ['ZEPTOMAIL_API_KEY'],'Accept':'application/json','Content-Type':'application/json'},method='POST')
  try:
   with urlopen(req,timeout=5) as response:
    status=getattr(response,'status',None) or response.getcode()
