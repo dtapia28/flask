@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 from urllib.error import URLError
 import pytest
 import main
+from checklist_app import mail as mail_service
 
 @pytest.fixture
 def client(monkeypatch):
@@ -409,7 +410,7 @@ def test_zeptomail_api_success_uses_https_timeout_and_redacts_message(client,mon
  def fake_urlopen(req,timeout):
   calls.append((req,timeout))
   return Response()
- monkeypatch.setattr(main,'urlopen',fake_urlopen)
+ monkeypatch.setattr(mail_service,'urlopen',fake_urlopen)
  secret_link='https://example.test/checklist/password/private-token'
  with main.app.app_context():
   assert main.send_mail('recipient@example.test','Invitación',f'Usa {secret_link}','invite:test','invite')
@@ -441,7 +442,7 @@ def test_zeptomail_api_failure_is_recoverable_and_resend_does_not_duplicate_user
   calls.append(req)
   if len(calls)==1: raise URLError('simulated timeout')
   return Response()
- monkeypatch.setattr(main,'urlopen',fake_urlopen)
+ monkeypatch.setattr(mail_service,'urlopen',fake_urlopen)
  invitation={'name':'Invitado','email':'invited@example.test'}
  failed=c.post('/admin/user',data=invitation,follow_redirects=True)
  assert b'La cuenta qued' in failed.data and b'Reenviar invitaci' in failed.data
@@ -479,7 +480,7 @@ def test_stale_pending_invitation_can_be_retried_without_duplicate_user(client,m
   def __exit__(self,*args): return False
  calls=[]
  def fake_urlopen(req,timeout): calls.append(req); return Response()
- monkeypatch.setattr(main,'urlopen',fake_urlopen)
+ monkeypatch.setattr(mail_service,'urlopen',fake_urlopen)
  with main.app.app_context():
   user=main.db.session.get(main.User,ids[1])
   main.db.session.add(main.MailLog(key=f'invite:{user.id}',recipient=user.email,kind='invite',body='[enlace temporal oculto]',status='pending',attempts=1,sent_at=main.now()-main.timedelta(minutes=3)))
