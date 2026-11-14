@@ -34,6 +34,14 @@ def send_zeptomail(recipient,subject,body):
    status=getattr(response,'status',None) or response.getcode()
    if not 200<=status<300: raise MailDeliveryError('El proveedor de correo rechazó el mensaje.')
  except HTTPError as exc:
+  # Keep the provider's diagnostic in Railway logs; the admin mail history
+  # intentionally stores only a stable error code. Redact addresses and keys
+  # because providers can echo request fields in their error responses.
+  provider_detail=exc.read(2048).decode('utf-8','replace').strip()
+  provider_detail=re.sub(r'[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}','[email]',provider_detail)
+  provider_detail=re.sub(r'(?i)(Zoho-enczapikey\s+)[^\s"\']+',r'\1[redacted]',provider_detail)
+  provider_detail=re.sub(r'(?i)((?:api[_ -]?key|token|authorization)["\'\s:=]+)[^,}\s"\']+',r'\1[redacted]',provider_detail)
+  current_app.logger.error('ZeptoMail rejected request: http_status=%s provider_detail=%s',exc.code,provider_detail[:500] or '[empty response]')
   raise MailDeliveryError(f'El proveedor de correo respondió HTTP {exc.code}.',f'http_{exc.code}') from None
  except (URLError,TimeoutError,OSError) as exc:
   raise MailDeliveryError('No se pudo conectar con el proveedor de correo.','connection_error') from None
