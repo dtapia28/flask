@@ -13,7 +13,7 @@ from flask_wtf.csrf import CSRFProtect
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask.cli import load_dotenv
 load_dotenv()
-from sqlalchemy import UniqueConstraint
+from sqlalchemy import UniqueConstraint, or_, and_, not_
 
 TZ = ZoneInfo('America/Santiago')
 def normalize_database_url(url):
@@ -66,7 +66,7 @@ class User(UserMixin,db.Model):
  @property
  def is_active(self): return self.active
 class Checklist(db.Model):
- id=db.Column(db.Integer,primary_key=True); name=db.Column(db.String(160),nullable=False); description=db.Column(db.Text,default=''); active=db.Column(db.Boolean,default=True); archived_at=db.Column(db.DateTime); tasks=db.relationship('Task',backref='checklist',order_by='Task.position'); assignments=db.relationship('Assignment',back_populates='checklist')
+ id=db.Column(db.Integer,primary_key=True); name=db.Column(db.String(160),nullable=False); description=db.Column(db.Text,default=''); active=db.Column(db.Boolean,default=True); archived_at=db.Column(db.DateTime); overdue_open_as_missed=db.Column(db.Boolean,default=False,nullable=False); tasks=db.relationship('Task',backref='checklist',order_by='Task.position'); assignments=db.relationship('Assignment',back_populates='checklist')
 class Task(db.Model):
  id=db.Column(db.Integer,primary_key=True); checklist_id=db.Column(db.ForeignKey('checklist.id'),nullable=False); section=db.Column(db.String(160),nullable=False,default='General'); text=db.Column(db.String(300),nullable=False); position=db.Column(db.Integer,default=0); active=db.Column(db.Boolean,default=True)
 class Assignment(db.Model):
@@ -171,6 +171,12 @@ def ordered_sections(checklist):
   if task.active: grouped.setdefault(task.section,[]).append(task)
  return list(grouped.items())
 app.jinja_env.globals['ordered_sections']=ordered_sections
+def record_status_label(record):
+ if record.status=='done': return 'Completada'
+ if record.status=='missed': return 'Incumplida'
+ if record.day<now().date() and record.assignment.checklist.overdue_open_as_missed: return 'No lograda'
+ return 'Pendiente'
+app.jinja_env.globals['record_status_label']=record_status_label
 def scheduled(a,d):
  schedule=schedule_for(a,d)
  return not schedule.paused and (not a.ended_at or d<=a.ended_at.astimezone(TZ).date()) and d>=a.start_date and d.weekday() in [int(x) for x in schedule.weekdays.split(',') if x]
@@ -288,8 +294,10 @@ def admin_review():
   if vals['from']: query=query.filter(DailyRecord.day>=date.fromisoformat(vals['from']))
   if vals['to']: query=query.filter(DailyRecord.day<=date.fromisoformat(vals['to']))
  except ValueError: abort(400)
- status_map={'done':'done','pending':'open','missed':'missed'}
- if vals['status'] in status_map: query=query.filter(DailyRecord.status==status_map[vals['status']])
+ overdue_open=and_(DailyRecord.status=='open',DailyRecord.day<now().date(),Checklist.overdue_open_as_missed.is_(True))
+ if vals['status']=='done': query=query.filter(DailyRecord.status=='done')
+ elif vals['status']=='pending': query=query.filter(and_(DailyRecord.status=='open',not_(overdue_open)))
+ elif vals['status']=='missed': query=query.filter(or_(DailyRecord.status=='missed',overdue_open))
  page=max(1,request.args.get('page',1,type=int)); pagination=query.order_by(DailyRecord.day.desc(),DailyRecord.id.desc()).paginate(page=page,per_page=20,error_out=False)
  users=User.query.filter_by(deleted_at=None).order_by(User.name).all(); lists=Checklist.query.order_by(Checklist.name).all()
  return render_template('admin_review.html',pagination=pagination,records=pagination.items,users=users,lists=lists,filters=vals,mails=MailLog.query.order_by(MailLog.sent_at.desc()).limit(100).all(),mail_view=request.args.get('view')=='mail')
@@ -447,7 +455,7 @@ def add_list():
   entries=[('General',line.strip()) for line in request.form.get('tasks','').splitlines() if line.strip()]
  if not entries:
   flash('Agrega al menos un elemento en una sección.'); return redirect(url_for('admin'))
- c=Checklist(name=request.form['name'],description=request.form.get('description','')); db.session.add(c); db.session.flush()
+ c=Checklist(name=request.form['name'],description=request.form.get('description',''),overdue_open_as_missed='overdue_open_as_missed' in request.form); db.session.add(c); db.session.flush()
  for position,(section,text) in enumerate(entries): db.session.add(Task(checklist_id=c.id,section=section,text=text,position=position))
  db.session.commit(); return redirect(url_for('admin_lists'))
 @app.post('/admin/list/<int:cid>/edit')
@@ -462,7 +470,7 @@ def edit_list(cid):
    if isinstance(item,dict) and isinstance(item.get('items',''),str):
     entries.extend((str(item.get('name','')).strip(),line.strip()) for line in item['items'].splitlines() if line.strip())
  if not entries or any(not sec or len(sec)>160 or len(text)>300 for sec,text in entries): flash('Agrega tareas con sección y respeta los límites de caracteres.'); return redirect(url_for('admin_lists',edit=cid))
- c.name=request.form.get('name','').strip(); c.description=request.form.get('description','').strip()
+ c.name=request.form.get('name','').strip(); c.description=request.form.get('description','').strip(); c.overdue_open_as_missed='overdue_open_as_missed' in request.form
  for task in Task.query.filter_by(checklist_id=cid).all(): task.active=False
  for pos,(section,text) in enumerate(entries): db.session.add(Task(checklist_id=cid,section=section,text=text,position=pos,active=True))
  db.session.commit(); flash('Lista guardada. Las ejecuciones existentes conservan sus tareas originales.'); return redirect(url_for('admin_lists'))
