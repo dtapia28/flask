@@ -23,9 +23,12 @@ class MailDeliveryError(Exception):
 def redacted_mail_body(body):
  return re.sub(r'https?://[^\s]*/password/[^\s]+', '[enlace temporal oculto]', body)
 def send_zeptomail(recipient,subject,body):
- payload={'from':{'address':os.environ['MAIL_FROM']},'to':[{'email_address':{'address':recipient}}],'subject':subject,'textbody':body}
+ bounce_address=os.environ.get('ZEPTOMAIL_BOUNCE_ADDRESS','').strip()
+ if not bounce_address:
+  raise MailDeliveryError('Falta configurar la dirección de rebotes verificada de ZeptoMail.','missing_bounce_address')
+ payload={'bounce_address':bounce_address,'from':{'address':os.environ['MAIL_FROM']},'to':[{'email_address':{'address':recipient}}],'subject':subject,'textbody':body}
  data=json.dumps(payload).encode('utf-8')
- req=Request(os.environ.get('ZEPTOMAIL_API_URL','https://api.zeptomail.com/v1.1/email'),data=data,headers={'Authorization':'Zoho-enczapikey '+os.environ['ZEPTOMAIL_API_KEY'],'Accept':'application/json','Content-Type':'application/json'},method='POST')
+ req=Request(os.environ.get('ZEPTOMAIL_API_URL','https://cpaas.zoho.com/v1.1/email'),data=data,headers={'Authorization':'Zoho-enczapikey '+os.environ['ZEPTOMAIL_API_KEY'],'Accept':'application/json','Content-Type':'application/json'},method='POST')
  try:
   with urlopen(req,timeout=5) as response:
    status=getattr(response,'status',None) or response.getcode()
