@@ -2,6 +2,10 @@
 
 Aplicación Flask en español para listas asignadas, cumplimiento diario e historial. Zona de negocio: `America/Santiago`. Roles: administrador y usuario.
 
+## Organización del código
+
+`main.py` configura y expone la aplicación Flask. El paquete `checklist_app` separa extensiones, modelos, lógica de dominio, correo, autenticación, rutas y comandos CLI. Se conservan `main:app`, los endpoints y los comandos Flask existentes.
+
 ## Ejecutar localmente (Mac / VS Code)
 
 1. Abre esta carpeta en VS Code y crea un entorno: `python3 -m venv .venv && source .venv/bin/activate`.
@@ -63,4 +67,4 @@ Se usa Flask-Migrate/Alembic. Para nueva versión: `flask --app main db migrate 
 
 ## Alcance actual y notas
 
-Las tareas se congelan en el primer registro diario creado, preservando días anteriores cuando cambien las listas. Administración se divide en Usuarios, Listas (con la vista interna Asignaciones) y Revisión. Las listas con asignaciones se archivan y sus asignaciones vigentes se pausan, mientras el historial permanece consultable. La eliminación de usuarios con referencias aplica una baja lógica y conserva las ejecuciones. Revisión muestra 20 registros por página, filtra por usuario, lista, fechas y estado, y ofrece detalle con corrección auditada. El historial personal también pagina de 20 en 20 y limita cada consulta a la cuenta autenticada.
+Las tareas se congelan en el primer registro diario creado, preservando días anteriores cuando cambien las listas. Administración se divide en Usuarios, Listas (con la vista interna Asignaciones) y Revisión. En cada lista se puede configurar que ejecuciones abiertas de días pasados aparezcan como “No lograda” en el historial; por defecto aparecen como “Pendiente”. Esta opción solo cambia la etiqueta y el filtro, no cierra ni modifica las marcas. Las listas con asignaciones se archivan y sus asignaciones vigentes se pausan, mientras el historial permanece consultable. La eliminación de usuarios con referencias aplica una baja lógica y conserva las ejecuciones. Revisión muestra 20 registros por página, filtra por usuario, lista, fechas y estado, y ofrece detalle con corrección auditada. El historial personal también pagina de 20 en 20 y limita cada consulta a la cuenta autenticada.
