@@ -237,6 +237,9 @@ def today():
  for a in Assignment.query.filter_by(user_id=current_user.id,ended_at=None).all():
   if scheduled(a,d): items.append((a,dayrecord(a,d)))
  db.session.commit(); return render_template('today.html',items=items,day=d)
+@app.get('/recetas')
+@login_required
+def recipes(): return render_template('recipes.html')
 @app.post('/record/<int:rid>/task/<int:sid>')
 @login_required
 def toggle(rid,sid):
