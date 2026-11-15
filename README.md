@@ -34,6 +34,10 @@ Una invitación fallida deja al usuario guardado y una fila `failed` o `pending`
 
 Cierres/envíos se procesan con `flask --app main process-closures`, que cierra los registros vencidos, manda los correos configurados y termina. Programa una ejecución cada 5 minutos en el servicio cron de Railway. El comando también puede ejecutarse manualmente en local. El endpoint autenticado `POST /admin/cron` sigue disponible para un cron HTTP externo. Los cierres atrasados usan la fecha local real; los correos quedan deduplicados en la base.
 
+## Recomendador de recetas con IA
+
+La vista Recetas permite pedir ideas de almuerzo/cena según la despensa y extraer alimentos/cantidades desde una foto o PDF de boleta. Requiere `OPENAI_API_KEY`; opcionalmente configura `OPENAI_MODEL` (por defecto `gpt-4.1-mini`) y `OPENAI_API_URL` (por defecto la API Responses). En local, agrega esas variables a `.env` y reinicia Flask. En Railway, agrega la clave como variable privada al servicio web de desarrollo. La clave nunca se envía al navegador. Los archivos de boleta se procesan en memoria, no se guardan en la aplicación y se envían a OpenAI para su lectura; los productos extraídos se muestran para que la persona los revise antes de guardarlos. Si no se configura la clave, la aplicación muestra un aviso al intentar usar IA y el resto de la vista sigue disponible.
+
 ## Railway
 
 El servicio web usa Gunicorn y el puerto que asigna Railway. Configura la migración y el health check en los ajustes del servicio al crearlo.
