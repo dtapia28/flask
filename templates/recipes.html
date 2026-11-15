@@ -46,10 +46,10 @@
 </div>
 
 <div class="modal fade" id="manualModal" tabindex="-1" aria-labelledby="manualTitle" aria-hidden="true">
- <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable"><div class="modal-content recipe-modal">
+ <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable"><form id="manual-form" class="modal-content recipe-modal">
   <div class="modal-header"><div><span class="section-eyebrow">ACTUALIZA TU DESPENSA</span><h2 class="modal-title" id="manualTitle">Agregar una compra</h2><p class="modal-subtitle">Añade todos los productos de esta compra y guárdalos juntos.</p></div><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button></div>
-  <form id="manual-form"><div class="modal-body"><div id="purchase-items" class="purchase-items"></div><button type="button" class="add-purchase-row" id="add-purchase-row"><i class="bi bi-plus-circle me-2"></i>Agregar otro producto</button><p class="form-hint"><i class="bi bi-info-circle me-1"></i>En esta vista previa se guarda solo en este navegador.</p></div><div class="modal-footer"><button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button><button class="btn btn-recipe-primary" type="submit"><i class="bi bi-basket-check me-2"></i>Guardar compra</button></div></form>
- </div></div>
+  <div class="modal-body"><div id="purchase-items" class="purchase-items"></div><button type="button" class="add-purchase-row" id="add-purchase-row"><i class="bi bi-plus-circle me-2"></i>Agregar otro producto</button><p class="form-hint"><i class="bi bi-info-circle me-1"></i>En esta vista previa se guarda solo en este navegador.</p></div><div class="modal-footer"><button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button><button class="btn btn-recipe-primary" type="submit"><i class="bi bi-basket-check me-2"></i>Guardar compra</button></div>
+ </form></div>
 </div>
 <template id="manual-item-template"><section class="purchase-item">
  <div class="purchase-item-heading"><span class="purchase-item-index"></span><button type="button" class="purchase-item-icon" data-icon-preview data-open-icon-picker aria-label="Cambiar icono" title="Cambiar icono">🛍️</button><button type="button" class="remove-purchase-item" data-remove-item aria-label="Quitar producto"><i class="bi bi-trash3"></i></button></div>
