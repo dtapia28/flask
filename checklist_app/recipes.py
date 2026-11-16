@@ -15,14 +15,18 @@ from flask_login import login_required
 def openai_response(content, instructions, max_output_tokens=1800, json_schema=None):
  api_key=os.environ.get('OPENAI_API_KEY')
  if not api_key: raise RuntimeError('La consulta con IA aún no está configurada en este entorno.')
- payload={'model':os.environ.get('OPENAI_MODEL','gpt-4.1-mini'),'store':False,'instructions':instructions,'input':[{'role':'user','content':content}],'max_output_tokens':max_output_tokens}
+ payload={'model':os.environ.get('OPENAI_MODEL','gpt-4o-mini'),'store':False,'instructions':instructions,'input':[{'role':'user','content':content}],'max_output_tokens':max_output_tokens}
  if json_schema:
   payload['text']={'format':{'type':'json_schema','name':'recipe_suggestions','strict':True,'schema':json_schema}}
  req=Request(os.environ.get('OPENAI_API_URL','https://api.openai.com/v1/responses'),data=json.dumps(payload).encode('utf-8'),headers={'Authorization':'Bearer '+api_key,'Content-Type':'application/json','Accept':'application/json'},method='POST')
  try:
   with urlopen(req,timeout=60,context=ssl.create_default_context(cafile=certifi.where())) as response: data=json.loads(response.read().decode('utf-8'))
  except HTTPError as exc:
-  current_app.logger.error('OpenAI API respondió HTTP %s.',exc.code)
+  try:
+   detail=json.loads(exc.read(1200).decode('utf-8','replace')).get('error',{})
+   error_type=str(detail.get('type',''))[:80]; error_code=str(detail.get('code',''))[:80]
+  except (ValueError,AttributeError,TypeError): error_type=''; error_code=''
+  current_app.logger.error('OpenAI API respondió HTTP %s (type=%s, code=%s).',exc.code,error_type,error_code)
   raise RuntimeError('La IA no pudo completar la consulta. Intenta nuevamente.') from None
  except (URLError,TimeoutError,OSError,ValueError) as exc:
   current_app.logger.error('No se pudo consultar OpenAI: %s',type(exc).__name__)
@@ -116,14 +120,14 @@ def suggest_recipes():
   # which aren't accepted by every Structured Outputs schema implementation.
   keys=[f'recipe_{index+1}' for index in range(count)]
   return {'type':'object','additionalProperties':False,'required':keys,'properties':{key:recipe_schema for key in keys}}
- meal_guidance=('Para la cena, devuelve solo cenas saludables y cotidianas para 2 personas: cada receta debe incluir una proteína (pollo, pescado, huevo, legumbres o similar) y al menos 250 g de verduras reales en total; no cuentes cebolla, ajo, limón ni hierbas como verduras. Prioriza lo disponible y permite como máximo una verdura común faltante. El arroz, pasta, quinoa o papas deben ser acompañamiento moderado, no la base del plato. Prefiere horno, cocción, vapor, plancha o salteado ligero con poco aceite. Excluye frituras, arroz frito, platos centrados en arroz, carnes procesadas y preparaciones con exceso de crema, mantequilla o queso. Si falta una verdura, inclúyela como el único ingrediente faltante; nunca inventes que falta algo que está en la despensa. ' if meal=='Cena' else 'Cada almuerzo debe incluir obligatoriamente una porción sustancial de proteína principal: pollo, pavo, carne, pescado, huevo, legumbres o tofu. Queso como acompañamiento no cuenta como proteína principal. No propongas pastas con salsa, purés, ensaladas ni platos de verduras sin esa proteína. Prioriza lo disponible; si no hay ninguna proteína en la despensa, agrega una proteína común y fácil de conseguir como único ingrediente faltante. Completa con verduras y un acompañamiento razonable. ')
+ meal_guidance=('Para la cena, devuelve solo cenas saludables y cotidianas para 2 personas: cada receta debe incluir una proteína (pollo, pescado, huevo, legumbres o similar) y al menos 250 g de verduras reales en total; no cuentes cebolla, ajo, limón ni hierbas como verduras. Prioriza lo disponible y permite como máximo una verdura común faltante. El arroz, pasta y quinoa deben ser acompañamientos moderados. El puré de papas también es un acompañamiento válido con proteína; permite hasta 500 g de papas en total para 2 porciones. Prefiere horno, cocción, vapor, plancha o salteado ligero con poco aceite. Excluye frituras, arroz frito, platos centrados en arroz, carnes procesadas y preparaciones con exceso de crema, mantequilla o queso. Si falta una verdura, inclúyela como el único ingrediente faltante; nunca inventes que falta algo que está en la despensa. ' if meal=='Cena' else 'Cada almuerzo debe incluir obligatoriamente una porción sustancial de proteína principal: pollo, pavo, carne, pescado, huevo, legumbres o tofu. Queso como acompañamiento no cuenta como proteína principal. El puré de papas sí está permitido como acompañamiento si el plato incluye esa proteína; puedes proponer pollo con puré como comida casera completa. No propongas puré, ensalada o verduras como plato único sin proteína. Prioriza lo disponible; si no hay ninguna proteína en la despensa, agrega una proteína común y fácil de conseguir como único ingrediente faltante. Completa con verduras y un acompañamiento razonable. ')
  dinner_healthy=True if meal=='Cena' else False
  vegetable_terms=('tomate','tomates','zanahoria','zanahorias','pimenton','pimientos','morron','espinaca','acelga','lechuga','repollo','brocoli','coliflor','zapallo','zapallo italiano','zapallito','zucchini','berenjena','pepino','champinon','champinones','hongos','poroto verde','porotos verdes','arveja','arvejas','choclo','maiz','apio','esparrago','esparragos','betarraga','verdura','verduras')
  protein_terms=('pollo','pavo','pescado','atun','salmon','jurel','reineta','merluza','carne','vacuno','cerdo','huevo','huevos','lenteja','lentejas','garbanzo','garbanzos','poroto','porotos','tofu','tempeh','quesillo','queso fresco','yogur griego')
  main_protein_terms=('pollo','pavo','pescado','atun','salmon','jurel','reineta','merluza','carne','vacuno','cerdo','huevo','huevos','lenteja','lentejas','garbanzo','garbanzos','poroto','porotos','tofu','tempeh')
  def has_main_protein(ingredients):
   return any(any(term in plain(item.get('name','')) for term in main_protein_terms) and not any(term in plain(item.get('name','')) for term in ('poroto verde','porotos verdes')) for item in ingredients)
- excluded_dinner_terms=('frito','frita','fritura','fritas','apanado','empanizado','rebozado','deep fry','vienesa','salchicha','longaniza','chorizo','tocino','bacon','papas fritas','crema espesa','mantequilla','mayonesa')
+ excluded_dinner_terms=('frito','frita','fritura','fritas','apanado','empanizado','rebozado','deep fry','vienesa','salchicha','longaniza','chorizo','tocino','bacon','papas fritas','crema espesa','mayonesa')
  def plain(value): return unicodedata.normalize('NFKD',str(value)).encode('ascii','ignore').decode('ascii').lower()
  def matching_stock(ingredient_name):
   candidate=plain(ingredient_name).strip()
@@ -153,11 +157,13 @@ def suggest_recipes():
    elif unit=='g': vegetable_grams+=amount
    elif unit=='unidad': vegetable_grams+=amount*100
    elif unit=='atado': vegetable_grams+=amount*100
-  starch_terms=('arroz','fideo','fideos','pasta','tallarines','quinoa','cuscus','couscous','papa','papas','patata','patatas','camote','boniato')
-  starch_grams=sum(float(item.get('amount',0))*(1000 if item.get('unit')=='kg' else 1) for item in ingredients if item.get('unit') in ('g','kg') and any(term in plain(item.get('name','')) for term in starch_terms))
+  grain_terms=('arroz','fideo','fideos','pasta','tallarines','quinoa','cuscus','couscous')
+  potato_terms=('papa','papas','patata','patatas','camote','boniato')
+  grain_grams=sum(float(item.get('amount',0))*(1000 if item.get('unit')=='kg' else 1) for item in ingredients if item.get('unit') in ('g','kg') and any(term in plain(item.get('name','')) for term in grain_terms))
+  potato_grams=sum(float(item.get('amount',0))*(1000 if item.get('unit')=='kg' else 1) for item in ingredients if item.get('unit') in ('g','kg') and any(term in plain(item.get('name','')) for term in potato_terms))
   methods=' '.join(plain(step) for step in steps)
   healthy_method=any(term in methods for term in ('hornea','hornear','horno','cocina','cocer','hervir','vapor','saltea','saltear','plancha','guisar','olla'))
-  return has_protein and vegetable_grams>=250 and starch_grams<=160 and healthy_method
+  return has_protein and vegetable_grams>=250 and grain_grams<=160 and potato_grams<=500 and healthy_method
  prompt='Propón recetas caseras reales, conocidas y reproducibles de '+meal.lower()+' usando principalmente estos ingredientes disponibles: '+json.dumps(safe_pantry,ensure_ascii=False)+'. Cada propuesta debe ser un plato concreto que una persona encontraría en un recetario (por ejemplo, tortilla de verduras, pollo al horno con verduras o guiso de lentejas), con nombre coherente con sus ingredientes y pasos de preparación propios; no inventes combinaciones con nombres que suenen a receta. Usa el nombre exacto de inventario para cada ingrediente que coincida. Usa también la unidad de inventario siempre que sea práctica. Si para una receta tradicional necesitas otra unidad (por ejemplo, piezas cuando la despensa está en kg), transforma la cantidad con una equivalencia culinaria promedio y razonable para ese ingrediente, redondeada a una cantidad práctica; no omitas el ingrediente por la diferencia de unidades. Convierte directamente kg/g y litro/ml cuando corresponda. Revisa la cantidad disponible y no uses más de lo que hay, salvo un único ingrediente faltante básico y fácil de conseguir; vuelve a comprobar los nombres antes de marcar algo como faltante. '+meal_guidance+'El agua potable de la llave siempre está disponible: no la incluyas en ingredientes ni como faltante, solo menciónala en la preparación si hace falta. Si las existencias son muy escasas, propón preparaciones acordes a ellas y explica honestamente cualquier limitación. Cantidades realistas para exactamente 2 porciones; las cantidades deben ser de cocina doméstica (nunca decenas de unidades de un ingrediente ni varios kilos/litros por receta). 3 a 5 pasos breves. No incluyas consejos médicos.'
  try:
   clean_recipes=[]; rejected_names=[]

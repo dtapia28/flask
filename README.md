@@ -40,7 +40,7 @@ Cierres/envíos se procesan con `flask --app main process-closures`, que cierra 
 
 ## Recomendador de recetas con IA
 
-La vista Recetas permite pedir ideas de almuerzo y cena según la despensa y extraer alimentos y cantidades desde una foto o PDF de boleta. Requiere `OPENAI_API_KEY`; opcionalmente configura `OPENAI_MODEL` (por defecto `gpt-4.1-mini`) y `OPENAI_API_URL` (por defecto la API Responses). La clave se configura como variable privada del servicio web y nunca se envía al navegador. Las boletas se procesan en memoria y se envían a OpenAI para su lectura; los productos se muestran para revisión antes de guardarlos. Sin clave, el resto de la vista sigue disponible.
+La vista Recetas permite pedir ideas de almuerzo y cena según la despensa y extraer alimentos y cantidades desde una foto o PDF de boleta. Requiere `OPENAI_API_KEY`; opcionalmente configura `OPENAI_MODEL` (por defecto `gpt-4o-mini`) y `OPENAI_API_URL` (por defecto la API Responses). La clave se configura como variable privada del servicio web y nunca se envía al navegador. Las boletas se procesan en memoria y se envían a OpenAI para su lectura; los productos se muestran para revisión antes de guardarlos. Sin clave, el resto de la vista sigue disponible.
 
 ## Railway
 
