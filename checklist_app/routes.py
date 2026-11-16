@@ -14,14 +14,15 @@ from checklist_app.domain import (dayrecord, evaluate_closures, ordered_sections
 from checklist_app.extensions import csrf, db
 from checklist_app.mail import MailDeliveryError, PENDING_MAIL_RETRY_AFTER, send_mail
 from checklist_app.models import (Assignment, AssignmentSchedule, ChangeLog, Checklist, DailyRecord, MailLog, Task, TaskSnapshot, Token, User)
+from checklist_app.recipes import extract_recipe_receipt, suggest_recipes
 from checklist_app.timeutils import TZ, now
 from checklist_app.webutils import public_url
 
-def home(): return redirect(url_for('today')) if current_user.is_authenticated else render_template('index.html')
+def home(): return render_template('index.html') if current_user.is_authenticated else redirect(url_for('login'))
 def login():
  if request.method=='POST':
   u=User.query.filter_by(email=request.form.get('email','').lower().strip()).first()
-  if u and u.active and check_password_hash(u.password,request.form.get('password','')): login_user(u); return redirect(url_for('today'))
+  if u and u.active and check_password_hash(u.password,request.form.get('password','')): login_user(u); return redirect(url_for('home'))
   flash('Correo o contraseña incorrectos.')
  return render_template('login.html')
 @login_required
@@ -32,6 +33,8 @@ def today():
  for a in Assignment.query.filter_by(user_id=current_user.id,ended_at=None).all():
   if scheduled(a,d): items.append((a,dayrecord(a,d)))
  db.session.commit(); return render_template('today.html',items=items,day=d)
+@login_required
+def recipes(): return render_template('recipes.html')
 @login_required
 def toggle(rid,sid):
  rec=db.session.get(DailyRecord,rid)
@@ -453,6 +456,9 @@ def register_routes(app):
         ('/login', 'login', login, ['GET', 'POST']),
         ('/logout', 'logout', logout, ['POST']),
         ('/today', 'today', today, ['GET']),
+        ('/recetas', 'recipes', recipes, ['GET']),
+        ('/api/recipes/extract-receipt', 'extract_recipe_receipt', extract_recipe_receipt, ['POST']),
+        ('/api/recipes/suggest', 'suggest_recipes', suggest_recipes, ['POST']),
         ('/record/<int:rid>/task/<int:sid>', 'toggle', toggle, ['POST']),
         ('/history', 'history', history, ['GET']),
         ('/progress', 'progress', progress, ['GET']),

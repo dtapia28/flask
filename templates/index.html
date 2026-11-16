@@ -1,1 +1,55 @@
-{% extends 'base.html' %}{% block content %}<section class="panel"><h1>Listas familiares, día a día</h1><p>Organiza tareas compartidas y lleva un registro claro de cada jornada.</p><a class="button" href="{{ url_for('login') }}">Ingresar</a></section>{% endblock %}
+{% extends 'base.html' %}
+{% block head_extra %}
+<link rel="preconnect" href="https://cdn.jsdelivr.net">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<link href="{{ url_for('static',filename='home.css') }}" rel="stylesheet">
+{% endblock %}
+{% block content %}
+<div class="home-page">
+  <section class="home-hero">
+    <div class="home-copy">
+      <span class="home-kicker"><i class="bi bi-house-heart-fill"></i> UN HOGAR MÁS ORGANIZADO</span>
+      <h1>Todo lo que hace<br>sentir <span>casa.</span></h1>
+      <p>Organiza las tareas del día y encuentra inspiración para cocinar. Elige por dónde empezar.</p>
+      {% if not current_user.is_authenticated %}
+      <a class="home-login" href="{{ url_for('login') }}">Ingresar a mi espacio <i class="bi bi-arrow-up-right"></i></a>
+      {% else %}
+      <span class="home-welcome"><i class="bi bi-sun"></i> Hola, {{ current_user.name }}</span>
+      {% endif %}
+    </div>
+    <div class="home-art" aria-hidden="true">
+      <div class="art-sun"></div><div class="art-plant plant-one">🌿</div><div class="art-plant plant-two">🪴</div>
+      <div class="art-window"><div></div><div></div><span></span><span></span></div>
+      <div class="art-table"><span>🍋</span><span>🥑</span><span>🌼</span></div>
+      <div class="art-caption">un poquito de orden,<br>un poquito de sabor</div>
+    </div>
+    <div class="home-stamp"><i class="bi bi-heart-fill"></i><span>hecho para<br><strong>la vida en casa</strong></span></div>
+  </section>
+
+  <div class="home-section-heading">
+    <div><span class="home-eyebrow">TU ESPACIO</span><h2>¿Qué necesitas hoy?</h2></div>
+    <span class="home-heading-note">Dos herramientas, una casa más simple.</span>
+  </div>
+
+  <section class="home-tools" aria-label="Herramientas">
+    <a class="home-tool checklist-tool" href="{{ url_for('today') if current_user.is_authenticated else url_for('login') }}">
+      <div class="tool-top"><span class="tool-icon"><i class="bi bi-check2-square"></i></span><span class="tool-arrow"><i class="bi bi-arrow-up-right"></i></span></div>
+      <span class="tool-label">UN PASO A LA VEZ</span>
+      <h3>Checklist</h3>
+      <p>Revisa tus tareas de hoy y marca lo que ya quedó listo.</p>
+      <span class="tool-link">{% if current_user.is_authenticated %}Ver mis tareas{% else %}Ingresar para continuar{% endif %} <i class="bi bi-arrow-right"></i></span>
+      <span class="tool-decoration check-decoration" aria-hidden="true"><i class="bi bi-check-lg"></i></span>
+    </a>
+    <a class="home-tool recipes-tool" href="{{ url_for('recipes') if current_user.is_authenticated else url_for('login') }}">
+      <div class="tool-top"><span class="tool-icon"><i class="bi bi-egg-fried"></i></span><span class="tool-arrow"><i class="bi bi-arrow-up-right"></i></span></div>
+      <span class="tool-label">INSPIRACIÓN EN LA COCINA</span>
+      <h3>Recetas</h3>
+      <p>Descubre qué cocinar con lo que tienes en tu despensa.</p>
+      <span class="tool-link">{% if current_user.is_authenticated %}Ir a mis recetas{% else %}Ingresar para continuar{% endif %} <i class="bi bi-arrow-right"></i></span>
+      <span class="tool-decoration recipe-decoration" aria-hidden="true">🥕</span>
+    </a>
+  </section>
+
+  <footer class="home-footer"><span><i class="bi bi-flower1"></i> Un hogar se construye en los pequeños momentos.</span><span>Familia Tapia Araya</span></footer>
+</div>
+{% endblock %}
