@@ -1,0 +1,71 @@
+{% extends 'base.html' %}
+{% block head_extra %}
+<meta name="csrf-token" content="{{ csrf_token() }}">
+<link rel="preconnect" href="https://cdn.jsdelivr.net">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+ <link href="{{url_for('static',filename='recipes.css')}}?v=20261115-pantry-units-8" rel="stylesheet">
+{% endblock %}
+{% block content %}
+<div class="recipe-app" id="recipe-app" data-suggest-url="{{url_for('suggest_recipes')}}" data-extract-url="{{url_for('extract_recipe_receipt')}}">
+ <section class="recipe-hero">
+  <div class="hero-copy"><div class="hero-kicker"><i class="bi bi-stars"></i> TU COCINA, MÁS SIMPLE</div><h1>¿Qué cocinamos<br><span>con lo que hay?</span></h1><p>Ideas ricas a partir de lo que ya tienes en casa.</p><div class="hero-actions"><button class="btn btn-light btn-lg" data-bs-toggle="modal" data-bs-target="#receiptModal"><i class="bi bi-camera me-2"></i>Cargar una boleta</button><button class="btn btn-outline-light btn-lg" data-bs-toggle="modal" data-bs-target="#manualModal"><i class="bi bi-plus-lg me-2"></i>Agregar compra</button></div></div>
+  <div class="hero-illustration"><div class="hero-orbit orbit-one" aria-hidden="true"></div><div class="hero-orbit orbit-two" aria-hidden="true"></div><div class="hero-food" aria-hidden="true"><span>🥑</span><span>🍅</span><span>🥕</span><span>🥬</span></div><button type="button" class="hero-note" id="hero-ask-recipe" aria-label="Revisar las recetas posibles con mi despensa usando inteligencia artificial"><i class="bi bi-magic" aria-hidden="true"></i><span>Tu despensa<br><strong>se convierte en ideas</strong></span></button></div>
+ </section>
+
+ <div class="demo-note"><i class="bi bi-info-circle-fill"></i><span><strong>Vista previa local</strong> · Tus productos y cambios se guardan en este navegador.</span><button type="button" class="demo-reset" id="reset-demo">Vaciar despensa</button></div>
+
+ <section class="pantry-stats" aria-label="Resumen de despensa">
+  <div class="stat-card"><span class="stat-icon green"><i class="bi bi-basket2"></i></span><div><small>En tu despensa</small><strong id="stat-items">—</strong></div></div>
+  <div class="stat-card"><span class="stat-icon lilac"><i class="bi bi-lightbulb"></i></span><div><small>Recetas posibles</small><strong id="stat-recipes">—</strong></div></div>
+ </section>
+
+ <section class="recipe-layout">
+  <aside class="pantry-panel">
+   <div class="panel-heading"><div><span class="section-eyebrow">LO QUE TIENES</span><h2>Mi despensa <span class="item-count" id="item-count">0</span></h2></div><button class="icon-button" aria-label="Agregar producto" data-bs-toggle="modal" data-bs-target="#manualModal"><i class="bi bi-plus-lg"></i></button></div>
+   <div class="pantry-search"><i class="bi bi-search"></i><input id="pantry-search" type="search" placeholder="Buscar ingrediente"></div>
+   <div class="pantry-filters" role="tablist"><button class="active" data-pantry-filter="Todos">Todo</button><button data-pantry-filter="Verduras">Verduras</button><button data-pantry-filter="Proteínas">Proteínas</button><button data-pantry-filter="Despensa">Despensa</button></div>
+   <div class="pantry-list" id="pantry-list"></div>
+   <button class="pantry-add" data-bs-toggle="modal" data-bs-target="#manualModal"><i class="bi bi-plus-circle me-2"></i>Agregar producto manualmente</button>
+   <div class="pantry-ai-action"><button type="button" class="btn btn-recipe-primary ai-suggest-button" id="ask-recipe-ai"><i class="bi bi-stars me-2"></i>Revisar recetas posibles con IA</button><small>Consulta usando las cantidades actuales de tu despensa.</small></div>
+  </aside>
+
+  <div class="suggestion-column">
+   <section class="suggestions-panel">
+    <div class="panel-heading suggestions-heading"><div><span class="section-eyebrow">INSPIRACIÓN PARA HOY</span><h2>Ideas con tus ingredientes</h2></div><div class="recipe-controls"><div class="meal-tabs" role="tablist"><button class="active" data-meal="Almuerzo">Almuerzo</button><button data-meal="Cena">Cena</button></div></div></div>
+    <p class="ai-status" id="ai-recipe-status" role="status" aria-live="polite">Las sugerencias de IA se actualizan cuando pulsas «Revisar recetas posibles con IA».</p>
+    <div class="recipe-grid" id="recipe-grid"></div>
+   </section>
+   <section class="tip-card"><div class="tip-icon"><i class="bi bi-sparkles"></i></div><div><strong>Menos desperdicio, más sabor</strong><p>Priorizamos ingredientes que conviene usar pronto y recetas que aprovechan lo que ya tienes.</p></div><span class="tip-decoration">🌿</span></section>
+  </div>
+ </section>
+
+ <section class="shopping-preview">
+  <div><span class="section-eyebrow">TU PRÓXIMA COMPRA</span><h2>Lista de compras</h2><p>Ingredientes que faltan para tus recetas favoritas.</p></div>
+  <div class="shopping-items" id="shopping-items"><span class="shopping-empty">Guarda una receta y aparecerán aquí los ingredientes que te faltan.</span></div>
+ </section>
+</div>
+
+<div class="modal fade" id="manualModal" tabindex="-1" aria-labelledby="manualTitle" aria-hidden="true">
+ <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable"><form id="manual-form" class="modal-content recipe-modal" novalidate>
+  <div class="modal-header"><div><span class="section-eyebrow">ACTUALIZA TU DESPENSA</span><h2 class="modal-title" id="manualTitle">Agregar una compra</h2><p class="modal-subtitle">Añade todos los productos de esta compra y guárdalos juntos.</p></div><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button></div>
+  <div class="modal-body"><div id="purchase-items" class="purchase-items"></div><button type="button" class="add-purchase-row" id="add-purchase-row"><i class="bi bi-plus-circle me-2"></i>Agregar otro producto</button><p class="form-hint"><i class="bi bi-info-circle me-1"></i>En esta vista previa se guarda solo en este navegador.</p></div><div class="modal-footer"><button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button><button class="btn btn-recipe-primary" id="save-purchase" type="button"><i class="bi bi-basket-check me-2"></i>Guardar compra</button></div>
+ </form></div>
+</div>
+<template id="manual-item-template"><section class="purchase-item">
+ <div class="purchase-item-heading"><span class="purchase-item-index"></span><button type="button" class="purchase-item-icon" data-icon-preview data-open-icon-picker aria-label="Cambiar icono" title="Cambiar icono">🛍️</button><button type="button" class="remove-purchase-item" data-remove-item aria-label="Quitar producto"><i class="bi bi-trash3"></i></button></div>
+ <label class="form-label">Producto<input class="form-control" data-field="name" placeholder="Ej. Huevos" required></label>
+ <div class="row g-3"><div class="col-7"><label class="form-label">Cantidad<input class="form-control" data-field="amount" type="number" min="0.01" step="any" placeholder="1" required></label></div><div class="col-5"><label class="form-label">Medida<select class="form-select" data-field="unit"><option>unidad</option><option>kg</option><option>g</option><option>litro</option><option>ml</option><option>paquete</option><option>atado</option></select></label></div></div>
+ <label class="form-label">Categoría<select class="form-select" data-field="category"><option>Verduras</option><option>Frutas</option><option>Proteínas</option><option>Lácteos</option><option>Despensa</option><option>Otros</option></select></label>
+ <input type="hidden" data-field="emoji" value="">
+ <div class="purchase-icon-quick" aria-label="Iconos rápidos"><span>Icono</span><button type="button" data-icon-choice="🥚" aria-label="Huevo" title="Huevo">🥚</button><button type="button" data-icon-choice="🍗" aria-label="Pollo" title="Pollo">🍗</button><button type="button" data-icon-choice="🍚" aria-label="Arroz" title="Arroz">🍚</button><button type="button" data-icon-choice="🍅" aria-label="Tomate" title="Tomate">🍅</button><button type="button" data-icon-choice="🥑" aria-label="Palta" title="Palta">🥑</button><button type="button" class="icon-auto-button active" data-auto-icon>Automático</button></div>
+ <details class="purchase-icon-details"><summary>Ver biblioteca completa</summary><div class="ingredient-icon-library" aria-label="Biblioteca de iconos de alimentos">
+  <button type="button" data-icon-choice="🥚" aria-label="Huevo" title="Huevo">🥚</button><button type="button" data-icon-choice="🍗" aria-label="Pollo" title="Pollo">🍗</button><button type="button" data-icon-choice="🥩" aria-label="Carne" title="Carne">🥩</button><button type="button" data-icon-choice="🐟" aria-label="Pescado" title="Pescado">🐟</button><button type="button" data-icon-choice="🍚" aria-label="Arroz" title="Arroz">🍚</button><button type="button" data-icon-choice="🍞" aria-label="Pan" title="Pan">🍞</button><button type="button" data-icon-choice="🫘" aria-label="Legumbres" title="Legumbres">🫘</button><button type="button" data-icon-choice="🧀" aria-label="Queso" title="Queso">🧀</button><button type="button" data-icon-choice="🥛" aria-label="Leche" title="Leche">🥛</button><button type="button" data-icon-choice="🥣" aria-label="Yogur" title="Yogur">🥣</button><button type="button" data-icon-choice="🍅" aria-label="Tomate" title="Tomate">🍅</button><button type="button" data-icon-choice="🥕" aria-label="Zanahoria" title="Zanahoria">🥕</button><button type="button" data-icon-choice="🥬" aria-label="Verduras de hoja" title="Verduras de hoja">🥬</button><button type="button" data-icon-choice="🥒" aria-label="Zapallo italiano" title="Zapallo italiano">🥒</button><button type="button" data-icon-choice="🥔" aria-label="Papa" title="Papa">🥔</button><button type="button" data-icon-choice="🧅" aria-label="Cebolla" title="Cebolla">🧅</button><button type="button" data-icon-choice="🍄" aria-label="Champiñón" title="Champiñón">🍄</button><button type="button" data-icon-choice="🥑" aria-label="Palta" title="Palta">🥑</button><button type="button" data-icon-choice="🍋" aria-label="Limón" title="Limón">🍋</button><button type="button" data-icon-choice="🍎" aria-label="Manzana" title="Manzana">🍎</button><button type="button" data-icon-choice="🍌" aria-label="Plátano" title="Plátano">🍌</button><button type="button" data-icon-choice="🎃" aria-label="Zapallo" title="Zapallo">🎃</button><button type="button" data-icon-choice="🌿" aria-label="Hierbas" title="Hierbas">🌿</button><button type="button" data-icon-choice="🛒" aria-label="Otro producto" title="Otro producto">🛒</button>
+ </div><button type="button" class="icon-auto-button" data-auto-icon>Usar icono automático</button></details>
+</section></template>
+<div class="modal fade" id="receiptModal" tabindex="-1" aria-labelledby="receiptTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered modal-lg"><div class="modal-content recipe-modal"><div class="modal-header"><div><span class="section-eyebrow">CARGA INTELIGENTE</span><h2 class="modal-title" id="receiptTitle">Agregar desde una boleta</h2><p class="modal-subtitle">Sube una foto o PDF. Revisa los productos antes de guardarlos.</p></div><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button></div><div class="modal-body"><label class="receipt-drop" for="receipt-file"><span class="upload-icon"><i class="bi bi-cloud-arrow-up"></i></span><strong>Arrastra tu boleta aquí</strong><small>o selecciona una imagen o PDF · máximo 5 MB</small><span class="btn btn-outline-secondary btn-sm">Seleccionar archivo</span><input id="receipt-file" type="file" accept="image/jpeg,image/png,image/webp,.pdf,application/pdf" hidden></label><p class="ai-status" id="receipt-ai-status" role="status" aria-live="polite"></p><button type="button" class="add-purchase-row receipt-manual-add" id="add-manual-extracted"><i class="bi bi-plus-lg me-2"></i>Agregar producto manualmente</button><div class="receipt-preview" id="receipt-preview" hidden><div class="extraction-heading"><div><strong id="receipt-filename">Boleta</strong><small><i class="bi bi-stars me-1"></i>Productos extraídos por IA · revísalos antes de guardar</small></div><span class="ai-badge">IA</span></div><div class="table-responsive"><table class="table extraction-table"><thead><tr><th></th><th>Producto</th><th>Cantidad</th><th>Unidad</th><th>Categoría</th><th></th></tr></thead><tbody id="extracted-rows"></tbody></table></div><p class="form-hint mb-0">La imagen se envía a la IA para leer la boleta. Verifica nombres y cantidades antes de agregarlos.</p></div></div><div class="modal-footer"><button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button><button type="button" class="btn btn-recipe-primary" id="add-extracted" disabled>Agregar seleccionados</button></div></div></div></div>
+
+<div class="modal fade" id="recipeModal" tabindex="-1" aria-labelledby="recipeModalTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content recipe-modal"><div class="modal-header"><div><span class="section-eyebrow">RECETA PARA TI</span><h2 class="modal-title" id="recipeModalTitle"></h2></div><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button></div><div class="modal-body" id="recipe-detail"></div><div class="modal-footer"><button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cerrar</button><button type="button" class="btn btn-recipe-primary" id="cook-recipe"><i class="bi bi-check2-circle me-2"></i>La preparé</button></div></div></div></div>
+<div class="toast-container position-fixed bottom-0 end-0 p-3"><div id="recipe-toast" class="toast align-items-center text-bg-dark border-0" role="status"><div class="d-flex"><div class="toast-body" id="recipe-toast-message"></div><button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Cerrar"></button></div></div></div>
+{% endblock %}
+{% block scripts %}<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script><script src="{{url_for('static',filename='recipes.js')}}?v=20261115-pantry-units-8"></script>{% endblock %}
